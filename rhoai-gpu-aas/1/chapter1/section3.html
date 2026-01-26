@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Module 4: Trust but Verify (Validation &amp; Troubleshooting) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <link rel="prev" href="section2.html">
+    <meta name="generator" content="Antora 3.1.3">
+    <link rel="stylesheet" href="../../../_/css/site.css">
+    <script>var uiRootPath = '../../../_'</script>
+  </head>
+  <body class="article">
+<header class="header">
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <a class="navbar-item" href="https://www.redhat.com" target="_blank"><img src="../../../_/img/redhat-logo.png" height="40px" alt="Red Hat"></a>
+      <a class="navbar-item" style="font-size: 24px; color: white" href="../../..">GPU as a Service on Red Hat OpenShift AI 3.2</a>
+      <button class="navbar-burger" data-target="topbar-nav">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+    <div id="topbar-nav" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item" href="https://github.com/RedHatQuickCourses/REPLACEREPONAME/issues" target="_blank">Report Issues</a>
+      </div>
+    </div>
+  </nav>
+</header>
+<div class="body">
+<div class="nav-container" data-component="rhoai-gpu-aas" data-version="1">
+  <aside class="nav">
+    <div class="panels">
+<div class="nav-panel-menu is-active" data-panel="menu">
+  <nav class="nav-menu">
+    <h3 class="title"><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></h3>
+<ul class="nav-list">
+  <li class="nav-item" data-depth="0">
+<ul class="nav-list">
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="../index.html">Home</a>
+  </li>
+</ul>
+  </li>
+  <li class="nav-item" data-depth="0">
+<ul class="nav-list">
+  <li class="nav-item" data-depth="1">
+    <button class="nav-item-toggle"></button>
+    <a class="nav-link" href="index.html">Introduction to GPU as a Service</a>
+<ul class="nav-list">
+  <li class="nav-item" data-depth="2">
+    <a class="nav-link" href="section1.html">Section 1</a>
+  </li>
+  <li class="nav-item" data-depth="2">
+    <a class="nav-link" href="section2.html">Section 2</a>
+  </li>
+  <li class="nav-item is-current-page" data-depth="2">
+    <a class="nav-link" href="section3.html">Validation &amp; Troubleshooting</a>
+  </li>
+</ul>
+  </li>
+</ul>
+  </li>
+</ul>
+  </nav>
+</div>
+<div class="nav-panel-explore" data-panel="explore">
+  <div class="context">
+    <span class="title">GPU as a Service on Red Hat OpenShift AI 3.2</span>
+    <span class="version">1</span>
+  </div>
+  <ul class="components">
+    <li class="component is-current">
+      <a class="title" href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a>
+      <ul class="versions">
+        <li class="version is-current is-latest">
+          <a href="../index.html">1</a>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</div>
+    </div>
+  </aside>
+</div>
+<main class="article">
+<div class="toolbar" role="navigation">
+<button class="nav-toggle"></button>
+  <a href="../index.html" class="home-link"></a>
+<nav class="breadcrumbs" aria-label="breadcrumbs">
+  <ul>
+    <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
+    <li><a href="index.html">Introduction to GPU as a Service</a></li>
+    <li><a href="section3.html">Validation &amp; Troubleshooting</a></li>
+  </ul>
+</nav>
+</div>
+  <div class="content">
+<aside class="toc sidebar" data-title="Contents" data-levels="2">
+  <div class="toc-menu"></div>
+</aside>
+<article class="doc">
+<h1 class="page">Module 4: Trust but Verify (Validation &amp; Troubleshooting)</h1>
+<div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p><strong>How to confirm your allocation engine is running and fix common "GPU Starvation" errors.</strong></p>
+</div>
+<div class="quoteblock abstract">
+<blockquote>
+You have applied the ConfigMaps and labeled the nodes. But is the system actually serving slices? This module provides the "Flight Check" procedures to validate your GPU-as-a-Service implementation and troubleshoot the two most common failure modes: The Silent OOM (Time-Slicing) and The Stuck Drain (MIG).
+</blockquote>
+</div>
+<div id="toc" class="toc">
+<div id="toctitle" class="title">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_phase_1_the_flight_check_validation">Phase 1: The Flight Check (Validation)</a>
+<ul class="sectlevel2">
+<li><a href="#_step_1_verify_the_advertised_capacity">Step 1: Verify the Advertised Capacity</a></li>
+<li><a href="#_step_2_verify_the_dashboard_menu">Step 2: Verify the Dashboard "Menu"</a></li>
+<li><a href="#_step_3_the_smoke_test_pod_execution">Step 3: The Smoke Test (Pod Execution)</a></li>
+</ul>
+</li>
+<li><a href="#_phase_2_troubleshooting_time_slicing">Phase 2: Troubleshooting Time-Slicing</a>
+<ul class="sectlevel2">
+<li><a href="#_scenario_a_the_silent_oom">Scenario A: The "Silent OOM"</a></li>
+<li><a href="#_scenario_b_replicas_not_showing_up">Scenario B: "Replicas Not Showing Up"</a></li>
+</ul>
+</li>
+<li><a href="#_phase_3_troubleshooting_mig">Phase 3: Troubleshooting MIG</a>
+<ul class="sectlevel2">
+<li><a href="#_scenario_c_the_stuck_drain">Scenario C: The "Stuck Drain"</a></li>
+<li><a href="#_scenario_d_profile_mismatch">Scenario D: "Profile Mismatch"</a></li>
+</ul>
+</li>
+<li><a href="#_summary_of_commands">Summary of Commands</a></li>
+<li><a href="#_course_completion">Course Completion</a></li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_phase_1_the_flight_check_validation"><a class="anchor" href="#_phase_1_the_flight_check_validation"></a>Phase 1: The Flight Check (Validation)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Before you invite users, you must verify the "Supply Chain" from the Node up to the Dashboard.</p>
+</div>
+<div class="sect2">
+<h3 id="_step_1_verify_the_advertised_capacity"><a class="anchor" href="#_step_1_verify_the_advertised_capacity"></a>Step 1: Verify the Advertised Capacity</h3>
+<div class="paragraph">
+<p>The first truth is the Node status. If the Node doesn&#8217;t see the slices, OpenShift AI never will.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash"># For Time-Slicing Check
+oc describe node &lt;node-name&gt; | grep "nvidia.com/gpu"
+
+# For MIG Check
+oc describe node &lt;node-name&gt; | grep "nvidia.com/mig"</code></pre>
+</div>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Success:</strong> You see a number greater than 1 (e.g., <code>nvidia.com/gpu: 4</code>).</p>
+</li>
+<li>
+<p><strong>Failure:</strong> You see <code>0</code> or <code>1</code> (The configuration didn&#8217;t apply).</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_step_2_verify_the_dashboard_menu"><a class="anchor" href="#_step_2_verify_the_dashboard_menu"></a>Step 2: Verify the Dashboard "Menu"</h3>
+<div class="paragraph">
+<p>The second truth is the User Interface.
+1. Log in to RHOAI Dashboard.
+2. Go to <strong>Settings &#8594; Hardware Profiles</strong>.
+3. Confirm your new profiles (e.g., "NVIDIA Shared" or "MIG 1g.5gb") are listed and <strong>Enabled</strong>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_step_3_the_smoke_test_pod_execution"><a class="anchor" href="#_step_3_the_smoke_test_pod_execution"></a>Step 3: The Smoke Test (Pod Execution)</h3>
+<div class="paragraph">
+<p>The final truth is execution. A node might advertise capacity but fail to launch a container due to driver errors. Run this simple "Hello World" pod to test the slice.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-smoke-test
+spec:
+  restartPolicy: OnFailure
+  containers:
+  - name: cuda-test
+    image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda11.7.1
+    resources:
+      limits:
+        nvidia.com/gpu: 1 # &lt;1&gt; Change this to 'nvidia.com/mig-1g.5gb' for MIG</code></pre>
+</div>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Result:</strong> <code>kubectl get pod gpu-smoke-test</code> should show <code>Completed</code>.</p>
+</li>
+<li>
+<p><strong>Logs:</strong> <code>kubectl logs gpu-smoke-test</code> should show <code>Test PASSED</code>.</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_phase_2_troubleshooting_time_slicing"><a class="anchor" href="#_phase_2_troubleshooting_time_slicing"></a>Phase 2: Troubleshooting Time-Slicing</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="_scenario_a_the_silent_oom"><a class="anchor" href="#_scenario_a_the_silent_oom"></a>Scenario A: The "Silent OOM"</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Symptom:</strong> Users report their kernels are dying randomly, or the "Kernel Restarting" message appears constantly in Jupyter.</p>
+</li>
+<li>
+<p><strong>Root Cause:</strong> Time-slicing shares memory. User A used 10GB, User B used 14GB, and the physical card only has 16GB. The GPU driver kills the process to save itself.</p>
+</li>
+<li>
+<p><strong>Fix:</strong> You cannot enforce memory limits on the GPU hardware with time-slicing. You must enforce them at the <strong>Container Level</strong> (RAM) to discourage massive data loading, or move that user to a MIG profile.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_scenario_b_replicas_not_showing_up"><a class="anchor" href="#_scenario_b_replicas_not_showing_up"></a>Scenario B: "Replicas Not Showing Up"</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Symptom:</strong> You applied the ConfigMap, but <code>oc describe node</code> still shows <code>nvidia.com/gpu: 1</code>.</p>
+</li>
+<li>
+<p><strong>Fix:</strong></p>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Check the Operator logs:
+<code>oc logs -n nvidia-gpu-operator -l app=gpu-operator-feature-discovery</code></p>
+</li>
+<li>
+<p><strong>Common Error:</strong> The <code>ClusterPolicy</code> was not patched to reference the ConfigMap name.</p>
+</li>
+<li>
+<p><strong>Common Error:</strong> The ConfigMap key (<code>any</code> or <code>tesla-t4</code>) does not match the actual GPU label on the node.</p>
+</li>
+</ol>
+</div>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_phase_3_troubleshooting_mig"><a class="anchor" href="#_phase_3_troubleshooting_mig"></a>Phase 3: Troubleshooting MIG</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="_scenario_c_the_stuck_drain"><a class="anchor" href="#_scenario_c_the_stuck_drain"></a>Scenario C: The "Stuck Drain"</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Symptom:</strong> You applied the MIG label, but the node is stuck in <code>SchedulingDisabled</code> or <code>NotReady</code> for hours.</p>
+</li>
+<li>
+<p><strong>Root Cause:</strong> The GPU Operator is trying to drain the node to repartition the hardware, but a Pod (usually a system pod or storage pod) is refusing to leave.</p>
+</li>
+<li>
+<p><strong>Fix:</strong></p>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Check pending evictions: <code>oc get pods --all-namespaces --field-selector spec.nodeName=&lt;node-name&gt;</code></p>
+</li>
+<li>
+<p>Force the drain if necessary (use with caution in prod).</p>
+</li>
+</ol>
+</div>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_scenario_d_profile_mismatch"><a class="anchor" href="#_scenario_d_profile_mismatch"></a>Scenario D: "Profile Mismatch"</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Symptom:</strong> The user selects the MIG Profile, but the Pod stays in <code>Pending</code>.</p>
+</li>
+<li>
+<p><strong>Error Message:</strong> <code>0/10 nodes are available: 10 Insufficient nvidia.com/mig-1g.5gb.</code></p>
+</li>
+<li>
+<p><strong>Root Cause:</strong> A typo in the string.</p>
+</li>
+<li>
+<p><strong>The Reality Check:</strong></p>
+</li>
+<li>
+<p>NFD advertises: <code>nvidia.com/mig-1g.5gb</code></p>
+</li>
+<li>
+<p>You requested: <code>nvidia.com/mig-1g.5gb</code> (Matches?)</p>
+</li>
+<li>
+<p><strong>Watch out for memory variations:</strong> Sometimes NFD sees <code>mig-1g.10gb</code> on newer A100 models. Always copy-paste from <code>oc describe node</code>.</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_summary_of_commands"><a class="anchor" href="#_summary_of_commands"></a>Summary of Commands</h2>
+<div class="sectionbody">
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 66.6667%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Goal</th>
+<th class="tableblock halign-left valign-top">Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Check Capacity</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>oc describe node &lt;node&gt; | grep nvidia</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Check Labels</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>oc get node &lt;node&gt; --show-labels</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Restart NFD</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>oc delete pod -n nvidia-gpu-operator -l app=nfd-worker</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>View Operator Logs</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>oc logs -f deployment/gpu-operator -n nvidia-gpu-operator</code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_course_completion"><a class="anchor" href="#_course_completion"></a>Course Completion</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Congratulations! You have successfully built, configured, and verified a <strong>GPU-as-a-Service</strong> allocation engine.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>You learned:</strong> How to stop "GPU Hoarding."</p>
+</li>
+<li>
+<p><strong>You built:</strong> Time-Slicing for density and MIG for isolation.</p>
+</li>
+<li>
+<p><strong>You verified:</strong> That the supply chain from Hardware to Dashboard is intact.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><strong>Now, go optimize those clusters.</strong></p>
+</div>
+</div>
+</div>
+<nav class="pagination">
+  <span class="prev"><a href="section2.html">Section 2</a></span>
+</nav>
+</article>
+  </div>
+</main>
+</div>
+<footer class="footer">
+  <img src="../../../_/img/rhl-logo-red.png" height="40px" alt="Red Hat"  href="https://redhat.com" >
+</footer><script id="site-script" src="../../../_/js/site.js" data-ui-root-path="../../../_"></script>
+<script async src="../../../_/js/vendor/highlight.js"></script>
+  </body>
+</html>
