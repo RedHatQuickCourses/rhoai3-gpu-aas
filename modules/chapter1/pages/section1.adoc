@@ -1,6 +1,126 @@
-= Section 1
+= Module 2: The Efficiency Engine (Time-Slicing)
+:navtitle: Configuring Time-Slicing
+:imagesdir: ../images
+:toc: macro
 
-* Create multiple copies of this section as needed.
-* Remove any unnecessary sections or chapter pages.
-* Customize the section as appropriate.
-* Ensure that each page contains a manageable amount of content.
+*How to oversubscribe your hardware and solve the "No GPUs Available" crisis.*
+
+[abstract]
+Time-slicing is the quickest way to increase density in your cluster. By enabling software-level interleaving, you can allow multiple workloads to share a single GPU. This module guides you through the three-step configuration process: The Map, The Policy, and The Label.
+
+toc::[]
+
+== Concept: The Gym Membership Model
+Think of Time-Slicing like a gym. You might have 100 members but only 10 treadmills. It works because not everyone runs at the exact same second.
+
+* **Without Time-Slicing:** When a user opens a Jupyter Notebook, they "lock the door" to the gym. No one else can enter, even if the user is just reading documentation.
+* **With Time-Slicing:** The door is unlocked. Multiple users can enter. The GPU (the treadmill) rapidly switches between them.
+
+[IMPORTANT]
+.The Safety Warning
+====
+**Shared Memory:** Time-slicing provides *compute* isolation (via context switching) but **not memory isolation**. All users share the same VRAM pool.
+* *Risk:* If User A runs a massive job that consumes 100% of the VRAM, User B's process will crash (OOM).
+* *Mitigation:* Use this strategy for Development, Notebooks, and Education—not for heavy production training.
+====
+
+== Step 1: Define the Slicing Configuration
+First, we tell the NVIDIA GPU Operator *how* to slice the cards. We do this with a `ConfigMap`.
+
+[source,yaml]
+----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: nvidia-gpu-operator
+data:
+  any: |-  # <1>
+    version: v1
+    sharing:
+      timeSlicing:
+        resources:
+        - name: nvidia.com/gpu
+          replicas: 4  # <2>
+----
+<1> **The Config Key:** We use `any` to apply this generic rule to any NVIDIA GPU. You can also use specific product names (e.g., `tesla-t4`, `a100`) to create different rules for different cards.
+<2> **Replicas:** This is the magic number. We are telling the driver to advertise 4 "virtual" GPUs for every 1 physical GPU.
+
+== Step 2: Activate the Configuration in ClusterPolicy
+Merely creating the ConfigMap does nothing. We must instruct the GPU Operator to read it.
+
+We patch the `ClusterPolicy` to reference our new map.
+
+[source,yaml]
+----
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  migStrategy: none  # <1>
+  devicePlugin:
+    config:
+      name: time-slicing-config  # <2>
+      default: any  # <3>
+----
+<1> **Disable MIG:** Time-slicing and MIG cannot usually coexist on the same node. We ensure MIG is off.
+<2> **Reference:** Points to the ConfigMap we created in Step 1.
+<3> **Default Strategy:** Tells the operator to apply the configuration keyed as `any` (from Step 1) to all GPUs unless specified otherwise.
+
+== Step 3: Verify the "Magic" (Node Capacity)
+Once the Operator processes the change, the Device Plugin will restart. You can verify the success by looking at the Node's capacity.
+
+Run the following command:
+[source,bash]
+----
+oc describe node <your-gpu-node> | grep "nvidia.com/gpu"
+----
+
+.Output Comparison
+[cols="1,1", options="header"]
+|===
+|Before |After
+|Capacity: `nvidia.com/gpu: 1` |Capacity: `nvidia.com/gpu: 4`
+|Allocatable: `nvidia.com/gpu: 1` |Allocatable: `nvidia.com/gpu: 4`
+|===
+
+
+
+The node now claims to have 4 GPUs. Kubernetes doesn't know they are fake; it just schedules pods until the counter hits 0.
+
+== Step 4: The Hardware Profile
+Now that the capacity exists, how do users consume it?
+
+With Time-Slicing, the resource name remains `nvidia.com/gpu`. Therefore, you do **not** need a specialized identifier in your Hardware Profile. You simply create a profile for "Shared GPU".
+
+[source,yaml]
+----
+apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: nvidia-gpu-shared
+  namespace: redhat-ods-applications # Global profile
+spec:
+  displayName: "NVIDIA GPU (Shared)"
+  description: "Best for interactive workbooks and coding. Memory is shared with other users."
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 1  # <1>
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+----
+<1> **The User Request:** The user still asks for "1 GPU". But because the node now has 4 to give, 4 users can successfully launch this profile on the same node.
+
+== Lab: Try it Yourself
+1. Create the `time-slicing-config` ConfigMap.
+2. Edit the `gpu-cluster-policy` to reference it.
+3. Watch the pods in `nvidia-gpu-operator` namespace restart.
+4. Verify `oc describe node` shows increased capacity.
+5. Create two Notebooks using the "Shared" profile and verify they land on the same node.
+
+== Next Steps
+Time-slicing is great for density, but what if you need **guaranteed performance** and **strict isolation**?
+Proceed to **Module 3: Configuring MIG** to learn the "Hard" partition strategy.

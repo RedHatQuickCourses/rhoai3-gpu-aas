@@ -1,69 +1,97 @@
-= GPU as a Service: From Hoarding to Efficient Allocation
-:navtitle: Introduction to GPU as a Service
+= GPU-as-a-Service: Optimizing ROI with Slicing & MIG
+:navtitle: GPU Optimization Intro
 :imagesdir: ../images
+:toc: macro
 
-*Stop lighting your GPU budget on fire. Start building a GPU allocation engine.*
+*Unlock the hidden capacity in your data center. Turn one physical GPU into seven virtual accelerators.*
 
-In the modern AI enterprise, GPUs are the most expensive and constrained resource. Yet, in many organizations, GPU consumption is treated like a "free-for-all." Data scientists hoard expensive GPUs "just in case," leaving them idle while high-priority training jobs sit in pending states. Development teams fight over scraps, and administrators are buried in tickets, manually managing GPU allocation like air traffic controllers in a storm.
+[abstract]
+You have spent the budget on NVIDIA A100s or H100s, but your monitoring dashboards tell a painful story: **Low Utilization.** This module teaches you how to architect a "GPU-as-a-Service" model using Red Hat OpenShift AI (RHOAI), the NVIDIA GPU Operator, and Node Feature Discovery (NFD).
 
-This is the "Wild West" of GPU infrastructure. It leads to massive waste, low ROI, and frustrated users.
+toc::[]
 
-[NOTE]
-.The Core Sales Objection
-====
-*"Why do we need GPU as a Service? Can't we just use public cloud APIs or standard Kubernetes resource requests?"*
+== The Utilization Gap
 
-Public APIs are simple but drain your wallet with unpredictable fees. Basic Kubernetes resource requests work for five users but fail at fifty. You need a factory floor, not manual intervention. GPU as a Service provides the governance layer that turns raw GPU compute into a managed, efficient utility.
-====
+In a standard Kubernetes environment, a GPU is a "monolithic" resource. If a data scientist requests a GPU for a Jupyter notebook to write code, Kubernetes assigns them the _entire_ physical card.
 
-== GPU as a Service
+* **The Cost:** That user might only use 2GB of VRAM and 5% of the compute cores.
+* **The Waste:** The remaining 75GB of memory and 95% of compute power sits idle, locked away from other users.
+* **The Result:** You run out of allocatable GPUs while your actual hardware sits empty.
 
-GPU as a Service on Red Hat OpenShift AI 3.2 transforms complex GPU allocation—Time-Slicing, Multi-Instance GPU (MIG), and resource limits—into a simple, governed service for your users.
 
-GPU as a Service serves as the abstraction layer between the complex physical reality of your GPU infrastructure (MIG partitions, specific GPU architectures, memory constraints) and the data scientists who just want to do their work.
 
-== Three Pillars of Value
+== The Solution: Virtualizing the Accelerator
 
-By implementing GPU as a Service, you unlock three critical capabilities that manual GPU management cannot provide:
+To solve this, we move from "Physical Allocation" to "Virtual Allocation." RHOAI supports two primary methods for slicing GPUs, allowing you to squeeze 4x to 7x more users onto the same hardware.
 
-=== 1. Maximize ROI ("The Efficiency Engine")
-Without GPU as a Service, a single user running a lightweight data prep notebook might lock an entire NVIDIA A100 GPU. This is financial waste.
+[cols="1,1", options="header"]
+|===
+|Strategy A: Time-Slicing (The "Soft" Cut)
+|Strategy B: MIG (The "Hard" Cut)
 
-* **The Win:** GPU as a Service enables **Time-Slicing** or targets **Multi-Instance GPU (MIG)** partitions, allowing multiple users to share the same physical GPU.
-* **The Benefit:** You can squeeze 4 to 5 times more concurrent users onto the same physical hardware. You define a "Small GPU" profile that shares resources, reserving exclusive access only for "Training" profiles.
+|**What it is:** Software-level oversubscription. The GPU context-switches between processes very quickly.
+|**What it is:** Hardware-level partitioning. The GPU is electrically divided into distinct instances.
 
-=== 2. Automated Fairness ("The Traffic Controller")
-In a shared environment, "noisy neighbors" can crash critical experiments. Without arbitration, the first person to claim resources wins, regardless of priority.
+|**Isolation:** Shared Memory (Low Isolation). One user's OOM error can crash the GPU.
+|**Isolation:** Dedicated Memory (High Isolation). Faults are contained within the slice.
 
-* **The Win:** GPU as a Service integrates natively with **Kueue**, a cloud-native job queuing system.
-* **The Benefit:** You achieve "Fair Share" scheduling. If Team A isn't using their quota, Team B can borrow it instantly. When Team A returns, the system reclaims resources automatically. This ensures 100% utilization without political friction.
+|**Best For:** Development, Classrooms, Notebooks, Code Generation.
+|**Best For:** Production Inference, Stable Training, Multi-tenant SaaS.
+|===
 
-=== 3. Industrialized Scale ("The User Experience")
-Data scientists should not need to learn YAML, GPU architectures, or MIG configuration to do their job. Forcing them to configure pod specs leads to errors and support tickets.
+== The Architecture: How It Works
 
-* **The Win:** GPU as a Service abstracts complexity into "T-Shirt sizes" (e.g., *Small - Shared GPU*, *Large - Exclusive A100*).
-* **The Benefit:** Users simply select a GPU profile from a dropdown menu in the RHOAI dashboard. You define the rules once in the background, and the platform enforces them forever.
+This course will guide you through the three layers required to build this engine:
 
-== Your Mission: Build the GPU Allocation Engine
+1.  **The Slicer (NVIDIA GPU Operator):**
+    You will configure the `ClusterPolicy` to tell the driver how to present the hardware (e.g., "Split this A100 into 7 slices").
 
-In this course, you will not just learn about GPU limits; you will build an automated GPU governance system. You will take on the role of a Platform Engineer tasked with industrializing a fleet of GPU resources.
+2.  **The Advertiser (Node Feature Discovery - NFD):**
+    Once sliced, NFD automatically detects the new virtual resources and labels the nodes.
+    * *Before:* `nvidia.com/gpu: 1`
+    * *After:* `nvidia.com/mig-1g.5gb: 7`
 
-You will execute the following technical workflow:
+3.  **The Vending Machine (Hardware Profiles):**
+    You will create RHOAI Hardware Profiles that target these specific NFD labels, allowing users to select "Small Slice" from a dropdown menu.
 
-1.  **Discovery & Configuration:** You will use CLI tools to identify your physical GPUs and configure Time-Slicing or MIG partitions to maximize density.
-2.  **Automated Creation:** You will move beyond the UI to define GPU profiles as code, setting strict memory limits and resource constraints.
-3.  **The Payoff (Integration):** You will connect these profiles to **Kueue**, enabling advanced scheduling logic that automatically manages GPU quotas across different teams.
+== Technical Preview: The ClusterPolicy
+
+You asked: *How do we actually turn this on?*
+
+In the upcoming "Hands-On" modules, we will be editing the **ClusterPolicy** Custom Resource. Here is a preview of the configuration we will apply to enable these features.
+
+[source,yaml]
+----
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  # 1. ENABLING MIG (The "Hard" Cut)
+  # 'mixed' allows a node to run different sized slices simultaneously
+  migStrategy: mixed
+
+  # 2. ENABLING TIME-SLICING (The "Soft" Cut)
+  # We reference a ConfigMap that defines how many replicas to create
+  devicePlugin:
+    config:
+      name: time-slicing-config
+      default: available  # Applies to GPUs not covered by specific configs
+----
 
 [IMPORTANT]
 .Prerequisites
 ====
-To successfully complete the hands-on sections of this course, you need:
+To complete the labs in this course, you will need:
 
-* Access to a **Red Hat OpenShift AI 3.2** cluster.
-* **Cluster-admin privileges** (to install Operators and configure GPU resources).
-* The **Node Feature Discovery (NFD)** Operator installed.
-* The **NVIDIA GPU Operator** installed and configured.
-* The `oc` CLI tool installed in your terminal.
+* **Cluster Admin access** to an OpenShift AI 3.x cluster.
+* **NVIDIA GPUs** (Pascal architecture or newer for Time-Slicing; Ampere A100/H100 for MIG).
+* The **OpenShift CLI (`oc`)**.
 ====
 
-Ready to reclaim your GPU budget? Let's start by analyzing your GPU landscape.
+== Next Steps
+
+Ready to stop the waste?
+
+* Proceed to **Module 2: Configuring Time-Slicing** for the quickest win.
+* Jump to **Module 3: Configuring MIG** for advanced isolation.
