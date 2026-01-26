@@ -1,6 +1,6 @@
 site:
-  title: FIXME Course Title
-  start_page: REPLACEREPONAME::index.adoc
+  title: GPU as a Service on Red Hat OpenShift AI 3.2
+  start_page: rhoai-gpu-aas::index.adoc
 
 content:
   sources:

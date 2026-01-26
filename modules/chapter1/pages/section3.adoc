@@ -1,6 +1,112 @@
-= Section 3
+= Module 4: Trust but Verify (Validation & Troubleshooting)
+:navtitle: Validation & Troubleshooting
+:imagesdir: ../images
+:toc: macro
 
-* Create multiple copies of this section as needed.
-* Remove any unnecessary sections or chapter pages.
-* Customize the section as appropriate.
-* Ensure that each page contains a manageable amount of content.
+*How to confirm your allocation engine is running and fix common "GPU Starvation" errors.*
+
+[abstract]
+You have applied the ConfigMaps and labeled the nodes. But is the system actually serving slices? This module provides the "Flight Check" procedures to validate your GPU-as-a-Service implementation and troubleshoot the two most common failure modes: The Silent OOM (Time-Slicing) and The Stuck Drain (MIG).
+
+toc::[]
+
+== Phase 1: The Flight Check (Validation)
+
+Before you invite users, you must verify the "Supply Chain" from the Node up to the Dashboard.
+
+=== Step 1: Verify the Advertised Capacity
+The first truth is the Node status. If the Node doesn't see the slices, OpenShift AI never will.
+
+[source,bash]
+----
+# For Time-Slicing Check
+oc describe node <node-name> | grep "nvidia.com/gpu"
+
+# For MIG Check
+oc describe node <node-name> | grep "nvidia.com/mig"
+----
+
+* **Success:** You see a number greater than 1 (e.g., `nvidia.com/gpu: 4`).
+* **Failure:** You see `0` or `1` (The configuration didn't apply).
+
+=== Step 2: Verify the Dashboard "Menu"
+The second truth is the User Interface.
+1. Log in to RHOAI Dashboard.
+2. Go to **Settings -> Hardware Profiles**.
+3. Confirm your new profiles (e.g., "NVIDIA Shared" or "MIG 1g.5gb") are listed and **Enabled**.
+
+
+
+=== Step 3: The Smoke Test (Pod Execution)
+The final truth is execution. A node might advertise capacity but fail to launch a container due to driver errors. Run this simple "Hello World" pod to test the slice.
+
+[source,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-smoke-test
+spec:
+  restartPolicy: OnFailure
+  containers:
+  - name: cuda-test
+    image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda11.7.1
+    resources:
+      limits:
+        nvidia.com/gpu: 1 # <1> Change this to 'nvidia.com/mig-1g.5gb' for MIG
+----
+* **Result:** `kubectl get pod gpu-smoke-test` should show `Completed`.
+* **Logs:** `kubectl logs gpu-smoke-test` should show `Test PASSED`.
+
+== Phase 2: Troubleshooting Time-Slicing
+
+=== Scenario A: The "Silent OOM"
+* **Symptom:** Users report their kernels are dying randomly, or the "Kernel Restarting" message appears constantly in Jupyter.
+* **Root Cause:** Time-slicing shares memory. User A used 10GB, User B used 14GB, and the physical card only has 16GB. The GPU driver kills the process to save itself.
+* **Fix:** You cannot enforce memory limits on the GPU hardware with time-slicing. You must enforce them at the **Container Level** (RAM) to discourage massive data loading, or move that user to a MIG profile.
+
+=== Scenario B: "Replicas Not Showing Up"
+* **Symptom:** You applied the ConfigMap, but `oc describe node` still shows `nvidia.com/gpu: 1`.
+* **Fix:**
+1. Check the Operator logs:
+   `oc logs -n nvidia-gpu-operator -l app=gpu-operator-feature-discovery`
+2. **Common Error:** The `ClusterPolicy` was not patched to reference the ConfigMap name.
+3. **Common Error:** The ConfigMap key (`any` or `tesla-t4`) does not match the actual GPU label on the node.
+
+== Phase 3: Troubleshooting MIG
+
+=== Scenario C: The "Stuck Drain"
+* **Symptom:** You applied the MIG label, but the node is stuck in `SchedulingDisabled` or `NotReady` for hours.
+* **Root Cause:** The GPU Operator is trying to drain the node to repartition the hardware, but a Pod (usually a system pod or storage pod) is refusing to leave.
+* **Fix:**
+1. Check pending evictions: `oc get pods --all-namespaces --field-selector spec.nodeName=<node-name>`
+2. Force the drain if necessary (use with caution in prod).
+
+=== Scenario D: "Profile Mismatch"
+* **Symptom:** The user selects the MIG Profile, but the Pod stays in `Pending`.
+* **Error Message:** `0/10 nodes are available: 10 Insufficient nvidia.com/mig-1g.5gb.`
+* **Root Cause:** A typo in the string.
+* **The Reality Check:**
+    * NFD advertises: `nvidia.com/mig-1g.5gb`
+    * You requested: `nvidia.com/mig-1g.5gb` (Matches?)
+    * *Watch out for memory variations:* Sometimes NFD sees `mig-1g.10gb` on newer A100 models. Always copy-paste from `oc describe node`.
+
+== Summary of Commands
+
+[cols="1,2", options="header"]
+|===
+|Goal |Command
+|**Check Capacity** |`oc describe node <node> \| grep nvidia`
+|**Check Labels** |`oc get node <node> --show-labels`
+|**Restart NFD** |`oc delete pod -n nvidia-gpu-operator -l app=nfd-worker`
+|**View Operator Logs** |`oc logs -f deployment/gpu-operator -n nvidia-gpu-operator`
+|===
+
+== Course Completion
+Congratulations! You have successfully built, configured, and verified a **GPU-as-a-Service** allocation engine.
+
+* **You learned:** How to stop "GPU Hoarding."
+* **You built:** Time-Slicing for density and MIG for isolation.
+* **You verified:** That the supply chain from Hardware to Dashboard is intact.
+
+*Now, go optimize those clusters.*

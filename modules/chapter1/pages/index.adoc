@@ -1,7 +1,69 @@
-= Chapter 1
+= GPU as a Service: From Hoarding to Efficient Allocation
+:navtitle: Introduction to GPU as a Service
+:imagesdir: ../images
 
-In this section, we cover... FIXME
+*Stop lighting your GPU budget on fire. Start building a GPU allocation engine.*
 
+In the modern AI enterprise, GPUs are the most expensive and constrained resource. Yet, in many organizations, GPU consumption is treated like a "free-for-all." Data scientists hoard expensive GPUs "just in case," leaving them idle while high-priority training jobs sit in pending states. Development teams fight over scraps, and administrators are buried in tickets, manually managing GPU allocation like air traffic controllers in a storm.
 
-- Add or remove section entries in the `antora.yaml` file as needed.
-- Ensure you create or delete the corresponding directory for the chapter accordingly.
+This is the "Wild West" of GPU infrastructure. It leads to massive waste, low ROI, and frustrated users.
+
+[NOTE]
+.The Core Sales Objection
+====
+*"Why do we need GPU as a Service? Can't we just use public cloud APIs or standard Kubernetes resource requests?"*
+
+Public APIs are simple but drain your wallet with unpredictable fees. Basic Kubernetes resource requests work for five users but fail at fifty. You need a factory floor, not manual intervention. GPU as a Service provides the governance layer that turns raw GPU compute into a managed, efficient utility.
+====
+
+== GPU as a Service
+
+GPU as a Service on Red Hat OpenShift AI 3.2 transforms complex GPU allocation—Time-Slicing, Multi-Instance GPU (MIG), and resource limits—into a simple, governed service for your users.
+
+GPU as a Service serves as the abstraction layer between the complex physical reality of your GPU infrastructure (MIG partitions, specific GPU architectures, memory constraints) and the data scientists who just want to do their work.
+
+== Three Pillars of Value
+
+By implementing GPU as a Service, you unlock three critical capabilities that manual GPU management cannot provide:
+
+=== 1. Maximize ROI ("The Efficiency Engine")
+Without GPU as a Service, a single user running a lightweight data prep notebook might lock an entire NVIDIA A100 GPU. This is financial waste.
+
+* **The Win:** GPU as a Service enables **Time-Slicing** or targets **Multi-Instance GPU (MIG)** partitions, allowing multiple users to share the same physical GPU.
+* **The Benefit:** You can squeeze 4 to 5 times more concurrent users onto the same physical hardware. You define a "Small GPU" profile that shares resources, reserving exclusive access only for "Training" profiles.
+
+=== 2. Automated Fairness ("The Traffic Controller")
+In a shared environment, "noisy neighbors" can crash critical experiments. Without arbitration, the first person to claim resources wins, regardless of priority.
+
+* **The Win:** GPU as a Service integrates natively with **Kueue**, a cloud-native job queuing system.
+* **The Benefit:** You achieve "Fair Share" scheduling. If Team A isn't using their quota, Team B can borrow it instantly. When Team A returns, the system reclaims resources automatically. This ensures 100% utilization without political friction.
+
+=== 3. Industrialized Scale ("The User Experience")
+Data scientists should not need to learn YAML, GPU architectures, or MIG configuration to do their job. Forcing them to configure pod specs leads to errors and support tickets.
+
+* **The Win:** GPU as a Service abstracts complexity into "T-Shirt sizes" (e.g., *Small - Shared GPU*, *Large - Exclusive A100*).
+* **The Benefit:** Users simply select a GPU profile from a dropdown menu in the RHOAI dashboard. You define the rules once in the background, and the platform enforces them forever.
+
+== Your Mission: Build the GPU Allocation Engine
+
+In this course, you will not just learn about GPU limits; you will build an automated GPU governance system. You will take on the role of a Platform Engineer tasked with industrializing a fleet of GPU resources.
+
+You will execute the following technical workflow:
+
+1.  **Discovery & Configuration:** You will use CLI tools to identify your physical GPUs and configure Time-Slicing or MIG partitions to maximize density.
+2.  **Automated Creation:** You will move beyond the UI to define GPU profiles as code, setting strict memory limits and resource constraints.
+3.  **The Payoff (Integration):** You will connect these profiles to **Kueue**, enabling advanced scheduling logic that automatically manages GPU quotas across different teams.
+
+[IMPORTANT]
+.Prerequisites
+====
+To successfully complete the hands-on sections of this course, you need:
+
+* Access to a **Red Hat OpenShift AI 3.2** cluster.
+* **Cluster-admin privileges** (to install Operators and configure GPU resources).
+* The **Node Feature Discovery (NFD)** Operator installed.
+* The **NVIDIA GPU Operator** installed and configured.
+* The `oc` CLI tool installed in your terminal.
+====
+
+Ready to reclaim your GPU budget? Let's start by analyzing your GPU landscape.

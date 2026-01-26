@@ -1,27 +1,5 @@
-= An Example Quick Course
+= Making GPU as a Service Work for You
 :navtitle: Home
+:imagesdir: ../chapter1/images
 
-== Introduction
-
-Course Title: Course title FIXME
-
-Description:
-Course description FIXME
-
-Duration: FIXME hours
-
-== Objectives
-
-On completing this course, you should be able to:
-
-* Observable, measurable objective...
-* Observable, measurable objective...
-* Observable, measurable objective...
-
-== Prerequisites
-
-This course assumes that you have the following prior experience:
-
-* Course or experience...
-* Course or experience...
-* Course or experience...
+include::chapter1:index.adoc[]
