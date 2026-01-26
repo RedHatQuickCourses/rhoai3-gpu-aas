@@ -1,4 +1,4 @@
-= Module 3: The Vault (Configuring MIG)
+= The Vault (Configuring MIG)
 :navtitle: Configuring MIG
 :imagesdir: ../images
 :toc: macro

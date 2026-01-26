@@ -1,4 +1,4 @@
-= Module 2: The Efficiency Engine (Time-Slicing)
+= The Efficiency Engine (Time-Slicing)
 :navtitle: Configuring Time-Slicing
 :imagesdir: ../images
 :toc: macro

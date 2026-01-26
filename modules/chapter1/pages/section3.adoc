@@ -1,4 +1,4 @@
-= Module 4: Trust but Verify (Validation & Troubleshooting)
+= Trust but Verify (Validation & Troubleshooting)
 :navtitle: Validation & Troubleshooting
 :imagesdir: ../images
 :toc: macro
