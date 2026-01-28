@@ -1,0 +1,114 @@
+= Module 2b: The Heavy Lifters (Multi-GPU Aggregation)
+:navtitle: Multi-GPU Aggregation
+:imagesdir: ../images
+:toc: macro
+
+*How to bundle smaller cards (T4, L40S) to rival the power of an H100.*
+
+[abstract]
+Not every organization can afford a fleet of H100s. Often, you will find yourself with nodes full of smaller cards like NVIDIA T4s or L40S. This module teaches you the "Aggregation Strategy"—how to bundle multiple physical GPUs into a single Hardware Profile to power Large Language Model (LLM) fine-tuning and distributed training.
+
+toc::[]
+
+== Concept: The "Voltron" Strategy
+Slicing (Module 2) and MIG (Module 3) are about taking a big resource and breaking it down. Aggregation is the opposite: taking small resources and combining them.
+
+* **The Scenario:** A Data Scientist needs 64GB of VRAM to fine-tune Llama-3-70B.
+* **The Problem:** You only have NVIDIA L40S cards (48GB VRAM each). A single card will crash with an OOM (Out of Memory) error.
+* **The Solution:** You create a Hardware Profile that binds **2x L40S cards** together. The workload sees 96GB of total addressable VRAM (if using distributed libraries like Ray or PyTorch DDP).
+
+== Step 1: The Basic "Bundle" Profile
+The core mechanism for aggregation is simple: you ask for more than one.
+
+In your Hardware Profile, you change the `count` parameter.
+
+[source,yaml]
+----
+apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: nvidia-dual-l40s
+  namespace: redhat-ods-applications
+spec:
+  displayName: "Dual L40S Station (96GB VRAM)"
+  description: "Bundles 2 physical GPUs for larger model training."
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 2  # <1> The Bundle Request
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+----
+<1> **The Scheduler's Job:** Kubernetes will strictly look for a node that has *at least* 2 free GPUs. If a node only has 1 free, it will be skipped.
+
+== Step 2: The Topology Trap (Critical Warning)
+Asking for "2 GPUs" is dangerous if you don't care *which* 2 you get.
+
+* **The Risk:** In some bare-metal servers, GPU 0 and GPU 1 might be on different PCIe switches (NUMA nodes). Communication between them is slow.
+* **The Requirement:** For training, you need GPUs connected via **NVLink** or high-speed interconnects.
+* **The Fix:** You must use `nodeSelectors` to pin this profile to machine types known to have good topology.
+
+[source,yaml]
+----
+  # Inside the Hardware Profile spec
+  nodeSelector:
+    # Example: Pinning to a specific Dell or AWS machine type
+    node.kubernetes.io/instance-type: "p5.48xlarge" 
+    # OR using a custom label you applied to your high-performance racks
+    hardware.topology/interconnect: "nvlink"
+----
+
+== Step 3: Aggregation with Kueue (Governance)
+If you are using the Governance architecture (from Module 4), you do not put the `count` in the Hardware Profile. You put it in the **ResourceFlavor**.
+
+This allows you to treat "Dual GPU" as a distinct class of service with its own quota.
+
+**1. Define the Flavor (The Physical Bundle)**
+[source,yaml]
+----
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: flavor-dual-gpu
+spec:
+  nodeLabels:
+    nvidia.com/gpu.count: "2" # <1> Target nodes with 2 cards
+  tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Exists"
+----
+
+**2. Define the Profile (The Logical Pointer)**
+[source,yaml]
+----
+apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: profile-dual-gpu-queue
+spec:
+  displayName: "Dual GPU Training (Queued)"
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 2 # <1>
+----
+<1> **Note:** Even with Kueue, passing `count: 2` here helps the dashboard validate the request, but the heavy lifting of admission checks is done by the ClusterQueue limits.
+
+== Lab: Create a "Heavy Lifter"
+1. **Identify Multi-GPU Nodes:** Run `oc get nodes -L nvidia.com/gpu.count` to find nodes with >1 GPU.
+2. **Create the Profile:** Define a `HardwareProfile` requesting `count: 2`.
+3. **Launch a Workbench:** Select the profile.
+4. **Verify inside the Pod:** Open a terminal in Jupyter and run:
+   `nvidia-smi`
+   *Result:* You should see two distinct GPU devices listed (Device 0 and Device 1).
+
+== Summary: The "Scaling Up" Strategy
+
+[cols="1,1", options="header"]
+|===
+|Strategy |Scaling Down (Slicing/MIG) |Scaling Up (Aggregation)
+|**Goal** |Efficiency (ROI) |Power (Performance)
+|**Mechanism** |1 GPU -> Many Users |Many GPUs -> 1 User
+|**Key Param** |`identifiers` (mig-1g.5gb) |`count` (2, 4, 8)
+|**Ideal For** |Notebooks, Dev, Inference |LLM Fine-tuning, Distributed Training
+|===
