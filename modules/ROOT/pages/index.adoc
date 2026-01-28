@@ -1,4 +1,4 @@
-= Making GPU as a Service Work for You
+= Making RHOAI GPU-as-a-Service Work for You
 :navtitle: Home
 :imagesdir: ../chapter1/images
 
