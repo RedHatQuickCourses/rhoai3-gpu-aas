@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Untitled :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <title>Module 2b: The Heavy Lifters (Multi-GPU Aggregation) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
     <link rel="prev" href="section4.html">
     <meta name="generator" content="Antora 3.1.3">
     <link rel="stylesheet" href="../../../_/css/site.css">
@@ -58,7 +58,7 @@
     <a class="nav-link" href="section4.html">Governance &amp; Quotas</a>
   </li>
   <li class="nav-item is-current-page" data-depth="1">
-    <a class="nav-link" href="section5.html">section5.adoc</a>
+    <a class="nav-link" href="section5.html">Multi-GPU Aggregation</a>
   </li>
 </ul>
   </li>
@@ -91,7 +91,7 @@
 <nav class="breadcrumbs" aria-label="breadcrumbs">
   <ul>
     <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
-    <li><a href="section5.html">section5.adoc</a></li>
+    <li><a href="section5.html">Multi-GPU Aggregation</a></li>
   </ul>
 </nav>
 </div>
@@ -100,7 +100,238 @@
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-
+<h1 class="page">Module 2b: The Heavy Lifters (Multi-GPU Aggregation)</h1>
+<div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p><strong>How to bundle smaller cards (T4, L40S) to rival the power of an H100.</strong></p>
+</div>
+<div class="quoteblock abstract">
+<blockquote>
+Not every organization can afford a fleet of H100s. Often, you will find yourself with nodes full of smaller cards like NVIDIA T4s or L40S. This module teaches you the "Aggregation Strategy"—how to bundle multiple physical GPUs into a single Hardware Profile to power Large Language Model (LLM) fine-tuning and distributed training.
+</blockquote>
+</div>
+<div id="toc" class="toc">
+<div id="toctitle" class="title">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_concept_the_voltron_strategy">Concept: The "Voltron" Strategy</a></li>
+<li><a href="#_step_1_the_basic_bundle_profile">Step 1: The Basic "Bundle" Profile</a></li>
+<li><a href="#_step_2_the_topology_trap_critical_warning">Step 2: The Topology Trap (Critical Warning)</a></li>
+<li><a href="#_step_3_aggregation_with_kueue_governance">Step 3: Aggregation with Kueue (Governance)</a></li>
+<li><a href="#_lab_create_a_heavy_lifter">Lab: Create a "Heavy Lifter"</a></li>
+<li><a href="#_summary_the_scaling_up_strategy">Summary: The "Scaling Up" Strategy</a></li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_concept_the_voltron_strategy"><a class="anchor" href="#_concept_the_voltron_strategy"></a>Concept: The "Voltron" Strategy</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Slicing (Module 2) and MIG (Module 3) are about taking a big resource and breaking it down. Aggregation is the opposite: taking small resources and combining them.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Scenario:</strong> A Data Scientist needs 64GB of VRAM to fine-tune Llama-3-70B.</p>
+</li>
+<li>
+<p><strong>The Problem:</strong> You only have NVIDIA L40S cards (48GB VRAM each). A single card will crash with an OOM (Out of Memory) error.</p>
+</li>
+<li>
+<p><strong>The Solution:</strong> You create a Hardware Profile that binds <strong>2x L40S cards</strong> together. The workload sees 96GB of total addressable VRAM (if using distributed libraries like Ray or PyTorch DDP).</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_1_the_basic_bundle_profile"><a class="anchor" href="#_step_1_the_basic_bundle_profile"></a>Step 1: The Basic "Bundle" Profile</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The core mechanism for aggregation is simple: you ask for more than one.</p>
+</div>
+<div class="paragraph">
+<p>In your Hardware Profile, you change the <code>count</code> parameter.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: nvidia-dual-l40s
+  namespace: redhat-ods-applications
+spec:
+  displayName: "Dual L40S Station (96GB VRAM)"
+  description: "Bundles 2 physical GPUs for larger model training."
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 2  # &lt;1&gt; The Bundle Request
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"</code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td><strong>The Scheduler&#8217;s Job:</strong> Kubernetes will strictly look for a node that has <strong>at least</strong> 2 free GPUs. If a node only has 1 free, it will be skipped.</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_2_the_topology_trap_critical_warning"><a class="anchor" href="#_step_2_the_topology_trap_critical_warning"></a>Step 2: The Topology Trap (Critical Warning)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Asking for "2 GPUs" is dangerous if you don&#8217;t care <strong>which</strong> 2 you get.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Risk:</strong> In some bare-metal servers, GPU 0 and GPU 1 might be on different PCIe switches (NUMA nodes). Communication between them is slow.</p>
+</li>
+<li>
+<p><strong>The Requirement:</strong> For training, you need GPUs connected via <strong>NVLink</strong> or high-speed interconnects.</p>
+</li>
+<li>
+<p><strong>The Fix:</strong> You must use <code>nodeSelectors</code> to pin this profile to machine types known to have good topology.</p>
+</li>
+</ul>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">  # Inside the Hardware Profile spec
+  nodeSelector:
+    # Example: Pinning to a specific Dell or AWS machine type
+    node.kubernetes.io/instance-type: "p5.48xlarge"
+    # OR using a custom label you applied to your high-performance racks
+    hardware.topology/interconnect: "nvlink"</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_3_aggregation_with_kueue_governance"><a class="anchor" href="#_step_3_aggregation_with_kueue_governance"></a>Step 3: Aggregation with Kueue (Governance)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>If you are using the Governance architecture (from Module 4), you do not put the <code>count</code> in the Hardware Profile. You put it in the <strong>ResourceFlavor</strong>.</p>
+</div>
+<div class="paragraph">
+<p>This allows you to treat "Dual GPU" as a distinct class of service with its own quota.</p>
+</div>
+<div class="paragraph">
+<p><strong>1. Define the Flavor (The Physical Bundle)</strong></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: flavor-dual-gpu
+spec:
+  nodeLabels:
+    nvidia.com/gpu.count: "2" # &lt;1&gt; Target nodes with 2 cards
+  tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Exists"</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p><strong>2. Define the Profile (The Logical Pointer)</strong></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: profile-dual-gpu-queue
+spec:
+  displayName: "Dual GPU Training (Queued)"
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 2 <i class="conum" data-value="1"></i><b>(1)</b></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td><strong>Note:</strong> Even with Kueue, passing <code>count: 2</code> here helps the dashboard validate the request, but the heavy lifting of admission checks is done by the ClusterQueue limits.</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_lab_create_a_heavy_lifter"><a class="anchor" href="#_lab_create_a_heavy_lifter"></a>Lab: Create a "Heavy Lifter"</h2>
+<div class="sectionbody">
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Identify Multi-GPU Nodes:</strong> Run <code>oc get nodes -L nvidia.com/gpu.count</code> to find nodes with &gt;1 GPU.</p>
+</li>
+<li>
+<p><strong>Create the Profile:</strong> Define a <code>HardwareProfile</code> requesting <code>count: 2</code>.</p>
+</li>
+<li>
+<p><strong>Launch a Workbench:</strong> Select the profile.</p>
+</li>
+<li>
+<p><strong>Verify inside the Pod:</strong> Open a terminal in Jupyter and run:
+<code>nvidia-smi</code>
+<strong>Result:</strong> You should see two distinct GPU devices listed (Device 0 and Device 1).</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_summary_the_scaling_up_strategy"><a class="anchor" href="#_summary_the_scaling_up_strategy"></a>Summary: The "Scaling Up" Strategy</h2>
+<div class="sectionbody">
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Strategy</th>
+<th class="tableblock halign-left valign-top">Scaling Down (Slicing/MIG)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Scaling Up (Aggregation)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Goal</strong></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Efficiency (ROI)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Power (Performance)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Mechanism</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1 GPU &#8594; Many Users</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Many GPUs &#8594; 1 User</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Key Param</strong></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>identifiers</code> (mig-1g.5gb)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>count</code> (2, 4, 8)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Ideal For</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Notebooks, Dev, Inference</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
 <nav class="pagination">
   <span class="prev"><a href="section4.html">Governance &amp; Quotas</a></span>
 </nav>
