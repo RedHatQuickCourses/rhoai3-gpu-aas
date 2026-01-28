@@ -1,0 +1,149 @@
+= Module 4: The Traffic Controller (Governance with Kueue)
+:navtitle: Governance & Quotas
+:imagesdir: ../images
+:toc: macro
+
+*How to stop the "Fastest Finger First" race by implementing Fair Share Queuing.*
+
+[abstract]
+You have sliced your GPUs (Module 2) and partitioned your hardware (Module 3). But if you simply expose these to users, the first team to log in will consume everything. This module introduces **Kueue**, the traffic controller that manages quotas, priority, and fairness.
+
+toc::[]
+
+== The "Pinning" vs. "Queuing" Dilemma
+
+Before you build your final Hardware Profile, you must make a critical architectural decision.
+
+[cols="1,1", options="header"]
+|===
+|Strategy A: Static Pinning (The Old Way)
+|Strategy B: Dynamic Queuing (The New Way)
+
+|**Mechanism:** The Hardware Profile contains `nodeSelectors` and `tolerations` directly.
+|**Mechanism:** The Hardware Profile contains a `LocalQueue` reference. The placement logic moves to a **ResourceFlavor**.
+
+|**Behavior:** "I want this specific node." If full, the pod stays Pending forever.
+|**Behavior:** "I want a resource like this." If full, the job is queued and prioritized.
+
+|**Fairness:** None. First come, first served.
+|**Fairness:** "Fair Share." Team A can borrow Team B's unused quota.
+|===
+
+
+
+== Step 0: Enabling the Service (Day 0 Config)
+Kueue is installed but "dormant" by default. You must flip three switches to make the queuing features visible in the RHOAI Dashboard.
+
+**1. Configure the Cluster State**
+Ensure your `DataScienceCluster` resource has the Kueue component set to `Managed` or `Unmanaged` (if you need custom tuning).
+
+**2. Enable the Dashboard UI**
+You must tell the RHOAI Dashboard to show the "Queue" options in the menu.
+[source,yaml]
+----
+apiVersion: opendatahub.io/v1alpha
+kind: OdhDashboardConfig
+metadata:
+  name: odh-dashboard-config
+  namespace: redhat-ods-applications
+spec:
+  # Enable the Queue selection UI
+  disableKueue: false
+----
+
+**3. Label the Namespace**
+Kueue only watches projects that are explicitly invited. You must label the user's namespace.
+[source,bash]
+----
+oc label namespace <user-project> kueue.openshift.io/managed=true
+----
+
+== Step 1: Define the Resource Flavor (The Physical Layer)
+In the Queuing model, the Hardware Profile becomes "dumb." It doesn't know about Taints or MIG labels. Instead, we define a **ResourceFlavor** object that holds the physical truth.
+
+[source,yaml]
+----
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: flavor-nvidia-mig-small
+spec:
+  nodeLabels:
+    nvidia.com/mig-1g.5gb: "true"  # <1> The NFD Label
+  tolerations:
+  - key: "nvidia.com/gpu"          # <2> The Taint Key
+    operator: "Exists"
+    effect: "NoSchedule"
+----
+<1> **The Connection:** This connects the abstract flavor to the specific MIG slice you created in Module 3.
+<2> **The Key:** This grants access to the Tainted node.
+
+== Step 2: Define the Cluster Queue (The Policy Layer)
+Now, we define the rules. Who gets what?
+
+[source,yaml]
+----
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: cluster-queue-gpu-pool
+spec:
+  namespaceSelector: {} # Applies to all projects
+  resourceGroups:
+  - coveredResources: ["nvidia.com/mig-1g.5gb"]
+    flavors:
+    - name: flavor-nvidia-mig-small
+      resources:
+      - name: "nvidia.com/mig-1g.5gb"
+        nominalQuota: 10  # <1>
+        borrowingLimit: 5 # <2>
+----
+<1> **Guaranteed Quota:** The team is promised 10 slices.
+<2> **Elasticity:** If the cluster is empty, they can borrow 5 more (Total 15).
+
+== Step 3: Define the Local Queue (The Bridge)
+Users cannot see the `ClusterQueue`. You must create a `LocalQueue` inside their project that acts as a connector.
+
+[source,yaml]
+----
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  namespace: <user-project>
+  name: local-queue-gpu
+spec:
+  clusterQueue: cluster-queue-gpu-pool # Reference to Step 2
+----
+
+== Step 4: The Hardware Profile (The User Menu)
+Finally, create the profile. When using Kueue, your Hardware Profile **must not** contain selectors.
+
+* **Incorrect (Legacy):** Profile contains `tolerations: [{key: nvidia...}]`
+* **Correct (Kueue):** Profile contains *only* the queue label.
+
+[source,yaml]
+----
+apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: profile-mig-small-queue
+  namespace: redhat-ods-applications
+spec:
+  displayName: "Small GPU Slice (Managed)"
+  description: "Queued access to 1g.5gb slices."
+  identifiers:
+    - identifier: nvidia.com/mig-1g.5gb
+      count: 1
+  # CRITICAL: No nodeSelector or tolerations here!
+  # The queuing system handles placement.
+----
+
+== Summary: The Full Supply Chain
+
+1. **Physical:** You labeled the node `mig-1g.5gb` (Module 3).
+2. **Logical:** You mapped that label to a `ResourceFlavor` (Module 4).
+3. **Policy:** You assigned that flavor a Quota in the `ClusterQueue`.
+4. **User:** The User selects the Profile, which submits a ticket to the Queue.
+
+== Next Steps
+Now that your governance layer is in place, proceed to **Module 5: Validation & Troubleshooting** to verify the end-to-end flow.
