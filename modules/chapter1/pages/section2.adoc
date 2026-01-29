@@ -12,9 +12,10 @@ toc::[]
 
 == Concept: The Apartment Complex
 If Time-Slicing is a gym where everyone shares the equipment, MIG is an apartment complex.
-* **The Structure:** You take one building (The A100) and build permanent walls to create 7 distinct apartments.
-* **The Isolation:** If a fire starts in Apartment 1 (a process crashes), the residents in Apartment 2 are completely safe. They don't share air (Compute) or space (Memory).
-* **The Cost:** You cannot change the walls instantly. Renovating (repartitioning) takes time and requires the building to be empty.
++
+ * **The Structure:** You take one building (The A100) and build permanent walls to create 7 distinct apartments.
+ * **The Isolation:** If a fire starts in Apartment 1 (a process crashes), the residents in Apartment 2 are completely safe. They don't share air (Compute) or space (Memory).
+ * **The Cost:** You cannot change the walls instantly. Renovating (repartitioning) takes time and requires the building to be empty.
 
 [NOTE]
 .Hardware Requirements

@@ -20,8 +20,10 @@ Think of Time-Slicing like a gym. You might have 100 members but only 10 treadmi
 .The Safety Warning
 ====
 **Shared Memory:** Time-slicing provides *compute* isolation (via context switching) but **not memory isolation**. All users share the same VRAM pool.
-* *Risk:* If User A runs a massive job that consumes 100% of the VRAM, User B's process will crash (OOM).
-* *Mitigation:* Use this strategy for Development, Notebooks, and Education—not for heavy production training.
++
+ * *Risk:* If User A runs a massive job that consumes 100% of the VRAM, User B's process will crash (OOM).
++
+ * *Mitigation:* Use this strategy for Development, Notebooks, and Education—not for heavy production training.
 ====
 
 == Step 1: Define the Slicing Configuration
