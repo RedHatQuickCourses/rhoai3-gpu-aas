@@ -151,9 +151,15 @@ Time-slicing is the quickest way to increase density in your cluster. By enablin
 <td class="content">
 <div class="title">The Safety Warning</div>
 <div class="paragraph">
-<p><strong>Shared Memory:</strong> Time-slicing provides <strong>compute</strong> isolation (via context switching) but <strong>not memory isolation</strong>. All users share the same VRAM pool.
-* <strong>Risk:</strong> If User A runs a massive job that consumes 100% of the VRAM, User B&#8217;s process will crash (OOM).
-* <strong>Mitigation:</strong> Use this strategy for Development, Notebooks, and Education—not for heavy production training.</p>
+<p><strong>Shared Memory:</strong> Time-slicing provides <strong>compute</strong> isolation (via context switching) but <strong>not memory isolation</strong>. All users share the same VRAM pool.</p>
+</div>
+<div class="paragraph">
+<p>+
+ * <strong>Risk:</strong> If User A runs a massive job that consumes 100% of the VRAM, User B&#8217;s process will crash (OOM).</p>
+</div>
+<div class="paragraph">
+<p>+
+ * <strong>Mitigation:</strong> Use this strategy for Development, Notebooks, and Education—not for heavy production training.</p>
 </div>
 </td>
 </tr>
