@@ -3,9 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Module 4: The Traffic Controller (Governance with Kueue) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <title>Lab: The Heavy Lifters (Multi-GPU Aggregation) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
     <link rel="prev" href="section3.html">
-    <link rel="next" href="section5.html">
     <meta name="generator" content="Antora 3.1.3">
     <link rel="stylesheet" href="../../../_/css/site.css">
     <script>var uiRootPath = '../../../_'</script>
@@ -56,10 +55,7 @@
     <a class="nav-link" href="section3.html">Governance Lab: Kueue &amp; Profiles</a>
   </li>
   <li class="nav-item is-current-page" data-depth="1">
-    <a class="nav-link" href="section4.html">Governance &amp; Quotas</a>
-  </li>
-  <li class="nav-item" data-depth="1">
-    <a class="nav-link" href="section5.html">Multi-GPU Aggregation</a>
+    <a class="nav-link" href="section4.html">Aggregation Lab: Scaling Up</a>
   </li>
 </ul>
   </li>
@@ -92,7 +88,7 @@
 <nav class="breadcrumbs" aria-label="breadcrumbs">
   <ul>
     <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
-    <li><a href="section4.html">Governance &amp; Quotas</a></li>
+    <li><a href="section4.html">Aggregation Lab: Scaling Up</a></li>
   </ul>
 </nav>
 </div>
@@ -101,262 +97,188 @@
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-<h1 class="page">Module 4: The Traffic Controller (Governance with Kueue)</h1>
+<h1 class="page">Lab: The Heavy Lifters (Multi-GPU Aggregation)</h1>
 <div id="preamble">
 <div class="sectionbody">
+<div class="paragraph lead">
+<p><strong>When a single engine isn&#8217;t enough, you build a cluster.</strong></p>
+</div>
 <div class="paragraph">
-<p><strong>How to stop the "Fastest Finger First" race by implementing Fair Share Queuing.</strong></p>
+<p>In the previous labs, we focused on <strong>efficiency</strong> (slicing 1 GPU into 4). Now, we pivot to <strong>power</strong>.</p>
 </div>
-<div class="quoteblock abstract">
-<blockquote>
-You have sliced your GPUs (Module 2) and partitioned your hardware (Module 3). But if you simply expose these to users, the first team to log in will consume everything. This module introduces <strong>Kueue</strong>, the traffic controller that manages quotas, priority, and fairness.
-</blockquote>
+<div class="paragraph">
+<p>A standard NVIDIA L40S has 48GB of VRAM. If your data scientists need to fine-tune a Llama-3-70B model, they will hit an "Out of Memory" (OOM) error immediately. To solve this, you must engineer a "Heavy Lifter" profile that aggregates multiple physical cards into a single addressable resource.</p>
 </div>
-<div id="toc" class="toc">
-<div id="toctitle" class="title">Table of Contents</div>
-<ul class="sectlevel1">
-<li><a href="#_the_pinning_vs_queuing_dilemma">The "Pinning" vs. "Queuing" Dilemma</a></li>
-<li><a href="#_step_0_enabling_the_service_day_0_config">Step 0: Enabling the Service (Day 0 Config)</a></li>
-<li><a href="#_step_1_define_the_resource_flavor_the_physical_layer">Step 1: Define the Resource Flavor (The Physical Layer)</a></li>
-<li><a href="#_step_2_define_the_cluster_queue_the_policy_layer">Step 2: Define the Cluster Queue (The Policy Layer)</a></li>
-<li><a href="#_step_3_define_the_local_queue_the_bridge">Step 3: Define the Local Queue (The Bridge)</a></li>
-<li><a href="#_step_4_the_hardware_profile_the_user_menu">Step 4: The Hardware Profile (The User Menu)</a></li>
-<li><a href="#_summary_the_full_supply_chain">Summary: The Full Supply Chain</a></li>
-<li><a href="#_next_steps">Next Steps</a></li>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_prerequisites"><a class="anchor" href="#_prerequisites"></a>Prerequisites</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Hardware:</strong> A node with at least 2 physical GPUs (e.g., <code>nvidia.com/gpu: 2</code> or more).</p>
+</li>
+<li>
+<p><strong>Topology:</strong> Ideally, these GPUs should be connected via high-speed interconnects (NVLink), though PCIe aggregation works for functional testing.</p>
+</li>
 </ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_the_pinning_vs_queuing_dilemma"><a class="anchor" href="#_the_pinning_vs_queuing_dilemma"></a>The "Pinning" vs. "Queuing" Dilemma</h2>
+<h2 id="_step_1_define_the_heavy_flavor_control"><a class="anchor" href="#_step_1_define_the_heavy_flavor_control"></a>Step 1: Define the "Heavy" Flavor (Control)</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Before you build your final Hardware Profile, you must make a critical architectural decision.</p>
+<p>Kueue needs to understand that a "Heavy" request is fundamentally different from a standard one. It requires a node with <strong>at least</strong> 2 cards available.</p>
 </div>
-<table class="tableblock frame-all grid-all stretch">
-<colgroup>
-<col style="width: 50%;">
-<col style="width: 50%;">
-</colgroup>
-<thead>
-<tr>
-<th class="tableblock halign-left valign-top">Strategy A: Static Pinning (The Old Way)</th>
-<th class="tableblock halign-left valign-top">Strategy B: Dynamic Queuing (The New Way)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Mechanism:</strong> The Hardware Profile contains <code>nodeSelectors</code> and <code>tolerations</code> directly.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Mechanism:</strong> The Hardware Profile contains a <code>LocalQueue</code> reference. The placement logic moves to a <strong>ResourceFlavor</strong>.</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Behavior:</strong> "I want this specific node." If full, the pod stays Pending forever.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Behavior:</strong> "I want a resource like this." If full, the job is queued and prioritized.</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Fairness:</strong> None. First come, first served.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Fairness:</strong> "Fair Share." Team A can borrow Team B&#8217;s unused quota.</p></td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_0_enabling_the_service_day_0_config"><a class="anchor" href="#_step_0_enabling_the_service_day_0_config"></a>Step 0: Enabling the Service (Day 0 Config)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Kueue is installed but "dormant" by default. You must flip three switches to make the queuing features visible in the RHOAI Dashboard.</p>
-</div>
-<div class="paragraph">
-<p><strong>1. Configure the Cluster State</strong>
-Ensure your <code>DataScienceCluster</code> resource has the Kueue component set to <code>Managed</code> or <code>Unmanaged</code> (if you need custom tuning).</p>
-</div>
-<div class="paragraph">
-<p><strong>2. Enable the Dashboard UI</strong>
-You must tell the RHOAI Dashboard to show the "Queue" options in the menu.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: opendatahub.io/v1alpha
-kind: OdhDashboardConfig
-metadata:
-  name: odh-dashboard-config
-  namespace: redhat-ods-applications
-spec:
-  # Enable the Queue selection UI
-  disableKueue: false</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p><strong>3. Label the Namespace</strong>
-Kueue only watches projects that are explicitly invited. You must label the user&#8217;s namespace.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc label namespace &lt;user-project&gt; kueue.openshift.io/managed=true</code></pre>
-</div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_1_define_the_resource_flavor_the_physical_layer"><a class="anchor" href="#_step_1_define_the_resource_flavor_the_physical_layer"></a>Step 1: Define the Resource Flavor (The Physical Layer)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>In the Queuing model, the Hardware Profile becomes "dumb." It doesn&#8217;t know about Taints or MIG labels. Instead, we define a <strong>ResourceFlavor</strong> object that holds the physical truth.</p>
-</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Create the Multi-GPU Flavor:</strong></p>
 <div class="listingblock">
 <div class="content">
 <pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: kueue.x-k8s.io/v1beta1
 kind: ResourceFlavor
 metadata:
-  name: flavor-nvidia-mig-small
+  name: flavor-dual-gpu
 spec:
   nodeLabels:
-    nvidia.com/mig-1g.5gb: "true"  # &lt;1&gt; The NFD Label
+    nvidia.com/gpu.count: "2"  # &lt;1&gt; Targeting nodes with high density
   tolerations:
-  - key: "nvidia.com/gpu"          # &lt;2&gt; The Taint Key
-    operator: "Exists"
-    effect: "NoSchedule"</code></pre>
+  - key: "nvidia.com/gpu"
+    operator: "Exists"</code></pre>
 </div>
 </div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>The Connection:</strong> This connects the abstract flavor to the specific MIG slice you created in Module 3.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="2"></i><b>2</b></td>
-<td><strong>The Key:</strong> This grants access to the Tainted node.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_2_define_the_cluster_queue_the_policy_layer"><a class="anchor" href="#_step_2_define_the_cluster_queue_the_policy_layer"></a>Step 2: Define the Cluster Queue (The Policy Layer)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Now, we define the rules. Who gets what?</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: kueue.x-k8s.io/v1beta1
-kind: ClusterQueue
-metadata:
-  name: cluster-queue-gpu-pool
-spec:
-  namespaceSelector: {} # Applies to all projects
-  resourceGroups:
-  - coveredResources: ["nvidia.com/mig-1g.5gb"]
-    flavors:
-    - name: flavor-nvidia-mig-small
-      resources:
-      - name: "nvidia.com/mig-1g.5gb"
-        nominalQuota: 10  <i class="conum" data-value="1"></i><b>(1)</b>
-        borrowingLimit: 5 <i class="conum" data-value="2"></i><b>(2)</b></code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>Guaranteed Quota:</strong> The team is promised 10 slices.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="2"></i><b>2</b></td>
-<td><strong>Elasticity:</strong> If the cluster is empty, they can borrow 5 more (Total 15).</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_3_define_the_local_queue_the_bridge"><a class="anchor" href="#_step_3_define_the_local_queue_the_bridge"></a>Step 3: Define the Local Queue (The Bridge)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Users cannot see the <code>ClusterQueue</code>. You must create a <code>LocalQueue</code> inside their project that acts as a connector.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: kueue.x-k8s.io/v1beta1
-kind: LocalQueue
-metadata:
-  namespace: &lt;user-project&gt;
-  name: local-queue-gpu
-spec:
-  clusterQueue: cluster-queue-gpu-pool # Reference to Step 2</code></pre>
-</div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_4_the_hardware_profile_the_user_menu"><a class="anchor" href="#_step_4_the_hardware_profile_the_user_menu"></a>Step 4: The Hardware Profile (The User Menu)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Finally, create the profile. When using Kueue, your Hardware Profile <strong>must not</strong> contain selectors.</p>
-</div>
-<div class="ulist">
-<ul>
-<li>
-<p><strong>Incorrect (Legacy):</strong> Profile contains <code>tolerations: [{key: nvidia&#8230;&#8203;}]</code></p>
-</li>
-<li>
-<p><strong>Correct (Kueue):</strong> Profile contains <strong>only</strong> the queue label.</p>
-</li>
-</ul>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
-kind: HardwareProfile
-metadata:
-  name: profile-mig-small-queue
-  namespace: redhat-ods-applications
-spec:
-  displayName: "Small GPU Slice (Managed)"
-  description: "Queued access to 1g.5gb slices."
-  identifiers:
-    - identifier: nvidia.com/mig-1g.5gb
-      count: 1
-  # CRITICAL: No nodeSelector or tolerations here!
-  # The queuing system handles placement.</code></pre>
-</div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_summary_the_full_supply_chain"><a class="anchor" href="#_summary_the_full_supply_chain"></a>Summary: The Full Supply Chain</h2>
-<div class="sectionbody">
-<div class="olist arabic">
-<ol class="arabic">
-<li>
-<p><strong>Physical:</strong> You labeled the node <code>mig-1g.5gb</code> (Module 3).</p>
-</li>
-<li>
-<p><strong>Logical:</strong> You mapped that label to a <code>ResourceFlavor</code> (Module 4).</p>
-</li>
-<li>
-<p><strong>Policy:</strong> You assigned that flavor a Quota in the <code>ClusterQueue</code>.</p>
-</li>
-<li>
-<p><strong>User:</strong> The User selects the Profile, which submits a ticket to the Queue.</p>
 </li>
 </ol>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_next_steps"><a class="anchor" href="#_next_steps"></a>Next Steps</h2>
+<h2 id="_step_2_update_the_quota_policy"><a class="anchor" href="#_step_2_update_the_quota_policy"></a>Step 2: Update the Quota (Policy)</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Now that your governance layer is in place, proceed to <strong>Module 5: Validation &amp; Troubleshooting</strong> to verify the end-to-end flow.</p>
+<p>Your existing <code>ClusterQueue</code> might restrict users to small quotas. We need to explicitly allow this heavy workload.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Patch the ClusterQueue:</strong>
+Add the new flavor to your existing queue configuration.</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: cluster-queue-gpu
+spec:
+  resourceGroups:
+  - coveredResources: ["nvidia.com/gpu"]
+    flavors:
+    - name: default-flavor # (Existing 1-GPU flavor)
+    - name: flavor-dual-gpu # &lt;1&gt; New 2-GPU flavor
+      resources:
+      - name: "nvidia.com/gpu"
+        nominalQuota: 4 # &lt;2&gt; Allow up to 2 concurrent "Dual GPU" jobs</code></pre>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_3_create_the_heavy_profile_demand"><a class="anchor" href="#_step_3_create_the_heavy_profile_demand"></a>Step 3: Create the "Heavy" Profile (Demand)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Now, we create the user-facing button. This is where we solve the "Topology Trap."</p>
+</div>
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+<div class="title">The Topology Trap</div>
+<div class="paragraph">
+<p>Requesting "2 GPUs" is dangerous if they are on different NUMA nodes (slow communication). For production training, you should ensure this profile targets machines with NVLink.</p>
+</div>
+</td>
+</tr>
+</table>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Define the Hardware Profile:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: profile-dual-l40s
+  namespace: redhat-ods-applications
+spec:
+  displayName: "Dual L40S Station (96GB VRAM)"
+  description: "Bundled 2x GPU for LLM Fine-tuning and Distributed Training."
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 2  # &lt;1&gt; The Aggregation Request
+  # Note: Kueue handles the placement, but you can add affinity here if not using Kueue</code></pre>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_4_verification_the_voltron_check"><a class="anchor" href="#_step_4_verification_the_voltron_check"></a>Step 4: Verification (The "Voltron" Check)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>We need to prove that the pod actually sees two distinct devices.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Launch a Workbench using the <strong>"Dual L40S Station"</strong> profile.</p>
+</li>
+<li>
+<p>Open a Terminal inside the Jupyter environment.</p>
+</li>
+<li>
+<p>Run the NVIDIA System Management Interface check:</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">nvidia-smi -L</code></pre>
+</div>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Success Criteria:</strong>
+You should see two distinct UUIDs listed:</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-text hljs" data-lang="text">GPU 0: NVIDIA L40S (UUID: GPU-123...)
+GPU 1: NVIDIA L40S (UUID: GPU-456...)</code></pre>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p><strong>You have now successfully engineered a scale-up solution. Your platform can handle both lightweight inference (Slicing) and heavy-duty training (Aggregation).</strong></p>
 </div>
 </div>
 </div>
 <nav class="pagination">
   <span class="prev"><a href="section3.html">Governance Lab: Kueue &amp; Profiles</a></span>
-  <span class="next"><a href="section5.html">Multi-GPU Aggregation</a></span>
 </nav>
 </article>
   </div>
