@@ -14,8 +14,8 @@ In the previous lab, you created 4x virtual GPUs per node. In this lab, you assu
 We will configure **Kueue** to manage the quota and deploy a **Hardware Profile** that allows users to request these slices without knowing the underlying complexity.
 
 == Prerequisites
-* **Supply:** You have completed Section 2 (Nodes are advertising `nvidia.com/gpu: 4`).
-* **Kueue:** The Kueue Operator is installed and set to `Managed` or `Unmanaged`.
+ * **Supply:** You have completed Section 2 (Nodes are advertising `nvidia.com/gpu: 4`).
+ * **Kueue:** The Kueue Operator is installed and set to `Managed` or `Unmanaged`.
 
 == Step 1: Initialize the Traffic Controller (Day 0 Config)
 By default, the RHOAI Dashboard hides the complex queuing options. We must enable them.
