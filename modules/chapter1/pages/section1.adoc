@@ -1,128 +1,81 @@
-= The Efficiency Engine (Time-Slicing)
-:navtitle: Configuring Time-Slicing
-:imagesdir: ../images
+= Architecture: The GPU-as-a-Service Stack
+:navtitle: Architecture Deep Dive
 :toc: macro
 
-*How to oversubscribe your hardware and solve the "No GPUs Available" crisis.*
+// Antora metadata
+:page-role: architecture-concept
+:description: Technical deep dive into the RHOAI GPU-as-a-Service stack: Decoupling Supply from Demand.
 
-[abstract]
-Time-slicing is the quickest way to increase density in your cluster. By enabling software-level interleaving, you can allow multiple workloads to share a single GPU. This module guides you through the three-step configuration process: The Map, The Policy, and The Label.
+[.lead]
+*To scale AI infrastructure, you must decouple the physical hardware from the user request.*
 
-toc::[]
+In a standard Kubernetes environment, users request specific nodes (e.g., via `nodeSelectors`). This creates a rigid 1:1 dependency that breaks at scale. The GPU-as-a-Service architecture introduces a **Governance Layer** that mediates between the available infrastructure and the user's intent.
 
-== Concept: The Gym Membership Model
-Think of Time-Slicing like a gym. You might have 100 members but only 10 treadmills. It works because not everyone runs at the exact same second.
+== The Decoupled Architecture
 
-* **Without Time-Slicing:** When a user opens a Jupyter Notebook, they "lock the door" to the gym. No one else can enter, even if the user is just reading documentation.
-* **With Time-Slicing:** The door is unlocked. Multiple users can enter. The GPU (the treadmill) rapidly switches between them.
+The system is composed of three distinct planes. Understand the interaction between these layers for troubleshooting and configuration.
 
-[IMPORTANT]
-.The Safety Warning
-====
-**Shared Memory:** Time-slicing provides *compute* isolation (via context switching) but **not memory isolation**. All users share the same VRAM pool.
-+
- * *Risk:* If User A runs a massive job that consumes 100% of the VRAM, User B's process will crash (OOM).
-+
- * *Mitigation:* Use this strategy for Development, Notebooks, and Education—not for heavy production training.
-====
 
-== Step 1: Define the Slicing Configuration
-First, we tell the NVIDIA GPU Operator *how* to slice the cards. We do this with a `ConfigMap`.
 
-[source,yaml]
-----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: time-slicing-config
-  namespace: nvidia-gpu-operator
-data:
-  any: |-  # <1>
-    version: v1
-    sharing:
-      timeSlicing:
-        resources:
-        - name: nvidia.com/gpu
-          replicas: 4  # <2>
-----
-<1> **The Config Key:** We use `any` to apply this generic rule to any NVIDIA GPU. You can also use specific product names (e.g., `tesla-t4`, `a100`) to create different rules for different cards.
-<2> **Replicas:** This is the magic number. We are telling the driver to advertise 4 "virtual" GPUs for every 1 physical GPU.
+=== 1. The Supply Plane (Virtualization)
+This layer is responsible for the **Physical Assets**. It converts raw silicon into advertised Kubernetes resources.
 
-== Step 2: Activate the Configuration in ClusterPolicy
-Merely creating the ConfigMap does nothing. We must instruct the GPU Operator to read it.
+* **NVIDIA GPU Operator:** The "Hypervisor" for the GPU. It applies the partitioning logic (Time-Slicing or MIG) to the driver.
+* **Node Feature Discovery (NFD):** The "Inventory System." It scans the modified driver state and labels the node with the new capacity.
+** *State Change:* The node transitions from advertising `nvidia.com/gpu: 1` (Physical) to `nvidia.com/gpu: 4` (Virtual Time-Sliced) or `nvidia.com/mig-1g.10gb: 7` (MIG).
 
-We patch the `ClusterPolicy` to reference our new map.
+=== 2. The Control Plane (Governance)
+This layer is responsible for **Arbitration**. It decides which workloads run based on quotas and priority, rather than simple node availability.
 
-[source,yaml]
-----
-apiVersion: nvidia.com/v1
-kind: ClusterPolicy
-metadata:
-  name: gpu-cluster-policy
-spec:
-  migStrategy: none  # <1>
-  devicePlugin:
-    config:
-      name: time-slicing-config  # <2>
-      default: any  # <3>
-----
-<1> **Disable MIG:** Time-slicing and MIG cannot usually coexist on the same node. We ensure MIG is off.
-<2> **Reference:** Points to the ConfigMap we created in Step 1.
-<3> **Default Strategy:** Tells the operator to apply the configuration keyed as `any` (from Step 1) to all GPUs unless specified otherwise.
+* **Kueue:** The scheduling engine. It intercepts Pods before they reach the standard Kubernetes scheduler.
+* **ResourceFlavor:** The "Translation Layer." It maps a logical request (e.g., "Standard GPU") to the physical node labels (e.g., `instance-type=p4d.24xlarge` or `mig-config=1g.5gb`).
+* **ClusterQueue:** The "Policy Engine." It enforces global limits (e.g., "Team Finance gets max 10 GPUs") and borrowing rules.
 
-== Step 3: Verify the "Magic" (Node Capacity)
-Once the Operator processes the change, the Device Plugin will restart. You can verify the success by looking at the Node's capacity.
+=== 3. The Demand Plane (Consumption)
+This layer is responsible for **User Experience**. It abstracts the complexity of the layers below.
 
-Run the following command:
-[source,bash]
-----
-oc describe node <your-gpu-node> | grep "nvidia.com/gpu"
-----
+* **Hardware Profile:** The "Service Catalog" entry. In this architecture, the profile does **not** point to a Node. It points to a **LocalQueue**. This ensures that all requests pass through the governance engine.
 
-.Output Comparison
-[cols="1,1", options="header"]
+== The Request Workflow (Packet Flow)
+
+When a Data Scientist clicks "Start" on a Workbench, the following sequence occurs:
+
+. **Submission:** The Dashboard generates a Pod spec containing a specific `hardware-profile` label.
+. **Interception:** The Hardware Profile Controller detects the label and injects a reference to the user's **LocalQueue**.
+. **Admission Check:** Kueue receives the job from the LocalQueue. It checks the parent **ClusterQueue**:
+* *Check 1:* Is there free quota?
+* *Check 2:* Is the priority high enough?
+. **Assignment:** If approved, Kueue assigns a **ResourceFlavor** to the job. This injects the necessary `nodeSelectors` and `tolerations` into the Pod.
+. **Scheduling:** The Pod—now fully decorated with physical constraints—is handed to the Kubernetes Scheduler, which binds it to a specific L40S node slice.
+
+== Component Configuration Map
+
+As a Platform Engineer, you will configure these specific Custom Resources (CRs) in the following order:
+
+[cols="1,2,2", options="header"]
 |===
-|Before |After
-|Capacity: `nvidia.com/gpu: 1` |Capacity: `nvidia.com/gpu: 4`
-|Allocatable: `nvidia.com/gpu: 1` |Allocatable: `nvidia.com/gpu: 4`
+|Layer |Custom Resource |Function
+
+|**Supply**
+|`ClusterPolicy`
+|Enables Time-Slicing or MIG strategies on the physical nodes.
+
+|**Control**
+|`ResourceFlavor`
+|Links the abstract "Flavor" to the specific NFD node labels.
+
+|**Control**
+|`ClusterQueue`
+|Defines the total pool of resources (Quota) available to the cluster.
+
+|**Demand**
+|`LocalQueue`
+|The entry point for a specific project namespace.
+
+|**Demand**
+|`HardwareProfile`
+|The visible menu item in the RHOAI Dashboard.
 |===
 
-
-
-The node now claims to have 4 GPUs. Kubernetes doesn't know they are fake; it just schedules pods until the counter hits 0.
-
-== Step 4: The Hardware Profile
-Now that the capacity exists, how do users consume it?
-
-With Time-Slicing, the resource name remains `nvidia.com/gpu`. Therefore, you do **not** need a specialized identifier in your Hardware Profile. You simply create a profile for "Shared GPU".
-
-[source,yaml]
-----
-apiVersion: dashboard.opendatahub.io/v1alpha1
-kind: HardwareProfile
-metadata:
-  name: nvidia-gpu-shared
-  namespace: redhat-ods-applications # Global profile
-spec:
-  displayName: "NVIDIA GPU (Shared)"
-  description: "Best for interactive workbooks and coding. Memory is shared with other users."
-  identifiers:
-    - identifier: nvidia.com/gpu
-      count: 1  # <1>
-  tolerations:
-    - key: "nvidia.com/gpu"
-      operator: "Exists"
-      effect: "NoSchedule"
-----
-<1> **The User Request:** The user still asks for "1 GPU". But because the node now has 4 to give, 4 users can successfully launch this profile on the same node.
-
-== Lab: Try it Yourself
-1. Create the `time-slicing-config` ConfigMap.
-2. Edit the `gpu-cluster-policy` to reference it.
-3. Watch the pods in `nvidia-gpu-operator` namespace restart.
-4. Verify `oc describe node` shows increased capacity.
-5. Create two Notebooks using the "Shared" profile and verify they land on the same node.
-
-== Next Steps
-Time-slicing is great for density, but what if you need **guaranteed performance** and **strict isolation**?
-Proceed to **Module 3: Configuring MIG** to learn the "Hard" partition strategy.
+---
+*With the architecture defined, proceed to the next section to configure the Supply Plane.*
