@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>The Efficiency Engine (Time-Slicing) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <title>Architecture: The GPU-as-a-Service Stack :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
     <link rel="prev" href="../index.html">
     <link rel="next" href="section2.html">
     <meta name="generator" content="Antora 3.1.3">
@@ -47,13 +47,13 @@
   <li class="nav-item" data-depth="0">
 <ul class="nav-list">
   <li class="nav-item is-current-page" data-depth="1">
-    <a class="nav-link" href="section1.html">Configuring Time-Slicing</a>
+    <a class="nav-link" href="section1.html">Architecture Deep Dive</a>
   </li>
   <li class="nav-item" data-depth="1">
     <a class="nav-link" href="section2.html">Configuring MIG</a>
   </li>
   <li class="nav-item" data-depth="1">
-    <a class="nav-link" href="section3.html">Validation &amp; Troubleshooting</a>
+    <a class="nav-link" href="section3.html">Supply Lab: Time-Slicing</a>
   </li>
   <li class="nav-item" data-depth="1">
     <a class="nav-link" href="section4.html">Governance &amp; Quotas</a>
@@ -92,7 +92,7 @@
 <nav class="breadcrumbs" aria-label="breadcrumbs">
   <ul>
     <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
-    <li><a href="section1.html">Configuring Time-Slicing</a></li>
+    <li><a href="section1.html">Architecture Deep Dive</a></li>
   </ul>
 </nav>
 </div>
@@ -101,260 +101,167 @@
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-<h1 class="page">The Efficiency Engine (Time-Slicing)</h1>
+<h1 class="page">Architecture: The GPU-as-a-Service Stack</h1>
 <div id="preamble">
 <div class="sectionbody">
+<div class="paragraph lead">
+<p><strong>To scale AI infrastructure, you must decouple the physical hardware from the user request.</strong></p>
+</div>
 <div class="paragraph">
-<p><strong>How to oversubscribe your hardware and solve the "No GPUs Available" crisis.</strong></p>
-</div>
-<div class="quoteblock abstract">
-<blockquote>
-Time-slicing is the quickest way to increase density in your cluster. By enabling software-level interleaving, you can allow multiple workloads to share a single GPU. This module guides you through the three-step configuration process: The Map, The Policy, and The Label.
-</blockquote>
-</div>
-<div id="toc" class="toc">
-<div id="toctitle" class="title">Table of Contents</div>
-<ul class="sectlevel1">
-<li><a href="#_concept_the_gym_membership_model">Concept: The Gym Membership Model</a></li>
-<li><a href="#_step_1_define_the_slicing_configuration">Step 1: Define the Slicing Configuration</a></li>
-<li><a href="#_step_2_activate_the_configuration_in_clusterpolicy">Step 2: Activate the Configuration in ClusterPolicy</a></li>
-<li><a href="#_step_3_verify_the_magic_node_capacity">Step 3: Verify the "Magic" (Node Capacity)</a></li>
-<li><a href="#_step_4_the_hardware_profile">Step 4: The Hardware Profile</a></li>
-<li><a href="#_lab_try_it_yourself">Lab: Try it Yourself</a></li>
-<li><a href="#_next_steps">Next Steps</a></li>
-</ul>
+<p>In a standard Kubernetes environment, users request specific nodes (e.g., via <code>nodeSelectors</code>). This creates a rigid 1:1 dependency that breaks at scale. The GPU-as-a-Service architecture introduces a <strong>Governance Layer</strong> that mediates between the available infrastructure and the user&#8217;s intent.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_concept_the_gym_membership_model"><a class="anchor" href="#_concept_the_gym_membership_model"></a>Concept: The Gym Membership Model</h2>
+<h2 id="_the_decoupled_architecture"><a class="anchor" href="#_the_decoupled_architecture"></a>The Decoupled Architecture</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Think of Time-Slicing like a gym. You might have 100 members but only 10 treadmills. It works because not everyone runs at the exact same second.</p>
+<p>The system is composed of three distinct planes. Understand the interaction between these layers for troubleshooting and configuration.</p>
+</div>
+<div class="sect2">
+<h3 id="_1_the_supply_plane_virtualization"><a class="anchor" href="#_1_the_supply_plane_virtualization"></a>1. The Supply Plane (Virtualization)</h3>
+<div class="paragraph">
+<p>This layer is responsible for the <strong>Physical Assets</strong>. It converts raw silicon into advertised Kubernetes resources.</p>
 </div>
 <div class="ulist">
 <ul>
 <li>
-<p><strong>Without Time-Slicing:</strong> When a user opens a Jupyter Notebook, they "lock the door" to the gym. No one else can enter, even if the user is just reading documentation.</p>
+<p><strong>NVIDIA GPU Operator:</strong> The "Hypervisor" for the GPU. It applies the partitioning logic (Time-Slicing or MIG) to the driver.</p>
 </li>
 <li>
-<p><strong>With Time-Slicing:</strong> The door is unlocked. Multiple users can enter. The GPU (the treadmill) rapidly switches between them.</p>
+<p><strong>Node Feature Discovery (NFD):</strong> The "Inventory System." It scans the modified driver state and labels the node with the new capacity.</p>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>State Change:</strong> The node transitions from advertising <code>nvidia.com/gpu: 1</code> (Physical) to <code>nvidia.com/gpu: 4</code> (Virtual Time-Sliced) or <code>nvidia.com/mig-1g.10gb: 7</code> (MIG).</p>
 </li>
 </ul>
 </div>
-<div class="admonitionblock important">
-<table>
-<tr>
-<td class="icon">
-<i class="fa icon-important" title="Important"></i>
-</td>
-<td class="content">
-<div class="title">The Safety Warning</div>
-<div class="paragraph">
-<p><strong>Shared Memory:</strong> Time-slicing provides <strong>compute</strong> isolation (via context switching) but <strong>not memory isolation</strong>. All users share the same VRAM pool.</p>
+</li>
+</ul>
 </div>
-<div class="paragraph">
-<p>+
- * <strong>Risk:</strong> If User A runs a massive job that consumes 100% of the VRAM, User B&#8217;s process will crash (OOM).</p>
 </div>
+<div class="sect2">
+<h3 id="_2_the_control_plane_governance"><a class="anchor" href="#_2_the_control_plane_governance"></a>2. The Control Plane (Governance)</h3>
 <div class="paragraph">
-<p>+
- * <strong>Mitigation:</strong> Use this strategy for Development, Notebooks, and Education—not for heavy production training.</p>
+<p>This layer is responsible for <strong>Arbitration</strong>. It decides which workloads run based on quotas and priority, rather than simple node availability.</p>
 </div>
-</td>
-</tr>
-</table>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Kueue:</strong> The scheduling engine. It intercepts Pods before they reach the standard Kubernetes scheduler.</p>
+</li>
+<li>
+<p><strong>ResourceFlavor:</strong> The "Translation Layer." It maps a logical request (e.g., "Standard GPU") to the physical node labels (e.g., <code>instance-type=p4d.24xlarge</code> or <code>mig-config=1g.5gb</code>).</p>
+</li>
+<li>
+<p><strong>ClusterQueue:</strong> The "Policy Engine." It enforces global limits (e.g., "Team Finance gets max 10 GPUs") and borrowing rules.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_3_the_demand_plane_consumption"><a class="anchor" href="#_3_the_demand_plane_consumption"></a>3. The Demand Plane (Consumption)</h3>
+<div class="paragraph">
+<p>This layer is responsible for <strong>User Experience</strong>. It abstracts the complexity of the layers below.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Hardware Profile:</strong> The "Service Catalog" entry. In this architecture, the profile does <strong>not</strong> point to a Node. It points to a <strong>LocalQueue</strong>. This ensures that all requests pass through the governance engine.</p>
+</li>
+</ul>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_step_1_define_the_slicing_configuration"><a class="anchor" href="#_step_1_define_the_slicing_configuration"></a>Step 1: Define the Slicing Configuration</h2>
+<h2 id="_the_request_workflow_packet_flow"><a class="anchor" href="#_the_request_workflow_packet_flow"></a>The Request Workflow (Packet Flow)</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>First, we tell the NVIDIA GPU Operator <strong>how</strong> to slice the cards. We do this with a <code>ConfigMap</code>.</p>
+<p>When a Data Scientist clicks "Start" on a Workbench, the following sequence occurs:</p>
 </div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: time-slicing-config
-  namespace: nvidia-gpu-operator
-data:
-  any: |-  <i class="conum" data-value="1"></i><b>(1)</b>
-    version: v1
-    sharing:
-      timeSlicing:
-        resources:
-        - name: nvidia.com/gpu
-          replicas: 4  <i class="conum" data-value="2"></i><b>(2)</b></code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>The Config Key:</strong> We use <code>any</code> to apply this generic rule to any NVIDIA GPU. You can also use specific product names (e.g., <code>tesla-t4</code>, <code>a100</code>) to create different rules for different cards.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="2"></i><b>2</b></td>
-<td><strong>Replicas:</strong> This is the magic number. We are telling the driver to advertise 4 "virtual" GPUs for every 1 physical GPU.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_2_activate_the_configuration_in_clusterpolicy"><a class="anchor" href="#_step_2_activate_the_configuration_in_clusterpolicy"></a>Step 2: Activate the Configuration in ClusterPolicy</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Merely creating the ConfigMap does nothing. We must instruct the GPU Operator to read it.</p>
-</div>
-<div class="paragraph">
-<p>We patch the <code>ClusterPolicy</code> to reference our new map.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: nvidia.com/v1
-kind: ClusterPolicy
-metadata:
-  name: gpu-cluster-policy
-spec:
-  migStrategy: none  <i class="conum" data-value="1"></i><b>(1)</b>
-  devicePlugin:
-    config:
-      name: time-slicing-config  <i class="conum" data-value="2"></i><b>(2)</b>
-      default: any  <i class="conum" data-value="3"></i><b>(3)</b></code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>Disable MIG:</strong> Time-slicing and MIG cannot usually coexist on the same node. We ensure MIG is off.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="2"></i><b>2</b></td>
-<td><strong>Reference:</strong> Points to the ConfigMap we created in Step 1.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="3"></i><b>3</b></td>
-<td><strong>Default Strategy:</strong> Tells the operator to apply the configuration keyed as <code>any</code> (from Step 1) to all GPUs unless specified otherwise.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_3_verify_the_magic_node_capacity"><a class="anchor" href="#_step_3_verify_the_magic_node_capacity"></a>Step 3: Verify the "Magic" (Node Capacity)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Once the Operator processes the change, the Device Plugin will restart. You can verify the success by looking at the Node&#8217;s capacity.</p>
-</div>
-<div class="paragraph">
-<p>Run the following command:</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc describe node &lt;your-gpu-node&gt; | grep "nvidia.com/gpu"</code></pre>
-</div>
-</div>
-<table class="tableblock frame-all grid-all stretch">
-<caption class="title">Table 1. Output Comparison</caption>
-<colgroup>
-<col style="width: 50%;">
-<col style="width: 50%;">
-</colgroup>
-<thead>
-<tr>
-<th class="tableblock halign-left valign-top">Before</th>
-<th class="tableblock halign-left valign-top">After</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Capacity: <code>nvidia.com/gpu: 1</code></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Capacity: <code>nvidia.com/gpu: 4</code></p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Allocatable: <code>nvidia.com/gpu: 1</code></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Allocatable: <code>nvidia.com/gpu: 4</code></p></td>
-</tr>
-</tbody>
-</table>
-<div class="paragraph">
-<p>The node now claims to have 4 GPUs. Kubernetes doesn&#8217;t know they are fake; it just schedules pods until the counter hits 0.</p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_4_the_hardware_profile"><a class="anchor" href="#_step_4_the_hardware_profile"></a>Step 4: The Hardware Profile</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Now that the capacity exists, how do users consume it?</p>
-</div>
-<div class="paragraph">
-<p>With Time-Slicing, the resource name remains <code>nvidia.com/gpu</code>. Therefore, you do <strong>not</strong> need a specialized identifier in your Hardware Profile. You simply create a profile for "Shared GPU".</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
-kind: HardwareProfile
-metadata:
-  name: nvidia-gpu-shared
-  namespace: redhat-ods-applications # Global profile
-spec:
-  displayName: "NVIDIA GPU (Shared)"
-  description: "Best for interactive workbooks and coding. Memory is shared with other users."
-  identifiers:
-    - identifier: nvidia.com/gpu
-      count: 1  <i class="conum" data-value="1"></i><b>(1)</b>
-  tolerations:
-    - key: "nvidia.com/gpu"
-      operator: "Exists"
-      effect: "NoSchedule"</code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>The User Request:</strong> The user still asks for "1 GPU". But because the node now has 4 to give, 4 users can successfully launch this profile on the same node.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_lab_try_it_yourself"><a class="anchor" href="#_lab_try_it_yourself"></a>Lab: Try it Yourself</h2>
-<div class="sectionbody">
 <div class="olist arabic">
 <ol class="arabic">
 <li>
-<p>Create the <code>time-slicing-config</code> ConfigMap.</p>
+<p><strong>Submission:</strong> The Dashboard generates a Pod spec containing a specific <code>hardware-profile</code> label.</p>
 </li>
 <li>
-<p>Edit the <code>gpu-cluster-policy</code> to reference it.</p>
+<p><strong>Interception:</strong> The Hardware Profile Controller detects the label and injects a reference to the user&#8217;s <strong>LocalQueue</strong>.</p>
 </li>
 <li>
-<p>Watch the pods in <code>nvidia-gpu-operator</code> namespace restart.</p>
+<p><strong>Admission Check:</strong> Kueue receives the job from the LocalQueue. It checks the parent <strong>ClusterQueue</strong>:</p>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Check 1:</strong> Is there free quota?</p>
 </li>
 <li>
-<p>Verify <code>oc describe node</code> shows increased capacity.</p>
+<p><strong>Check 2:</strong> Is the priority high enough?</p>
+</li>
+</ul>
+</div>
 </li>
 <li>
-<p>Create two Notebooks using the "Shared" profile and verify they land on the same node.</p>
+<p><strong>Assignment:</strong> If approved, Kueue assigns a <strong>ResourceFlavor</strong> to the job. This injects the necessary <code>nodeSelectors</code> and <code>tolerations</code> into the Pod.</p>
+</li>
+<li>
+<p><strong>Scheduling:</strong> The Pod—now fully decorated with physical constraints—is handed to the Kubernetes Scheduler, which binds it to a specific L40S node slice.</p>
 </li>
 </ol>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_next_steps"><a class="anchor" href="#_next_steps"></a>Next Steps</h2>
+<h2 id="_component_configuration_map"><a class="anchor" href="#_component_configuration_map"></a>Component Configuration Map</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Time-slicing is great for density, but what if you need <strong>guaranteed performance</strong> and <strong>strict isolation</strong>?
-Proceed to <strong>Module 3: Configuring MIG</strong> to learn the "Hard" partition strategy.</p>
+<p>As a Platform Engineer, you will configure these specific Custom Resources (CRs) in the following order:</p>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 20%;">
+<col style="width: 40%;">
+<col style="width: 40%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Layer</th>
+<th class="tableblock halign-left valign-top">Custom Resource</th>
+<th class="tableblock halign-left valign-top">Function</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Supply</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>ClusterPolicy</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Enables Time-Slicing or MIG strategies on the physical nodes.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Control</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>ResourceFlavor</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Links the abstract "Flavor" to the specific NFD node labels.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Control</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>ClusterQueue</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Defines the total pool of resources (Quota) available to the cluster.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Demand</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>LocalQueue</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">The entry point for a specific project namespace.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Demand</strong></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>HardwareProfile</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">The visible menu item in the RHOAI Dashboard.</p></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<div class="paragraph">
+<p><strong>With the architecture defined, proceed to the next section to configure the Supply Plane.</strong></p>
 </div>
 </div>
 </div>
