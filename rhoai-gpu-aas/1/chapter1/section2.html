@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>The Vault (Configuring MIG) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <title>Lab: Configuring the Virtualization Layer (Supply) :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
     <link rel="prev" href="section1.html">
     <link rel="next" href="section3.html">
     <meta name="generator" content="Antora 3.1.3">
@@ -50,7 +50,7 @@
     <a class="nav-link" href="section1.html">Architecture Deep Dive</a>
   </li>
   <li class="nav-item is-current-page" data-depth="1">
-    <a class="nav-link" href="section2.html">Configuring MIG</a>
+    <a class="nav-link" href="section2.html">Supply Lab: Time-Slicing</a>
   </li>
   <li class="nav-item" data-depth="1">
     <a class="nav-link" href="section3.html">Supply Lab: Time-Slicing</a>
@@ -92,7 +92,7 @@
 <nav class="breadcrumbs" aria-label="breadcrumbs">
   <ul>
     <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
-    <li><a href="section2.html">Configuring MIG</a></li>
+    <li><a href="section2.html">Supply Lab: Time-Slicing</a></li>
   </ul>
 </nav>
 </div>
@@ -101,43 +101,137 @@
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-<h1 class="page">The Vault (Configuring MIG)</h1>
+<h1 class="page">Lab: Configuring the Virtualization Layer (Supply)</h1>
 <div id="preamble">
 <div class="sectionbody">
+<div class="paragraph lead">
+<p><strong>Raw hardware is inefficient. We must virtualize the asset to maximize throughput.</strong></p>
+</div>
 <div class="paragraph">
-<p><strong>How to partition your A100/H100s into secure, isolated hardware instances.</strong></p>
+<p>In this lab, you assume the role of the <strong>Infrastructure Engineer</strong>. Your objective is to take a physical NVIDIA L40S (48GB VRAM) and reconfigure it to support multiple concurrent inference workloads.</p>
 </div>
-<div class="quoteblock abstract">
-<blockquote>
-While Time-Slicing increases density, it sacrifices isolation. For production workloads, you need "Hard Walls." Multi-Instance GPU (MIG) allows you to partition a single physical GPU into multiple, completely isolated instances—each with its own dedicated memory, cache, and compute cores.
-</blockquote>
+<div class="paragraph">
+<p>We will implement a <strong>Time-Slicing Strategy</strong>. By instructing the driver to interleave processes, we will transform 1 physical GPU into 4 logical accelerators, each capable of running a 7B parameter model.</p>
 </div>
-<div id="toc" class="toc">
-<div id="toctitle" class="title">Table of Contents</div>
-<ul class="sectlevel1">
-<li><a href="#_concept_the_apartment_complex">Concept: The Apartment Complex</a></li>
-<li><a href="#_step_1_enable_the_mig_strategy">Step 1: Enable the MIG Strategy</a></li>
-<li><a href="#_step_2_define_the_geometry_the_labeling">Step 2: Define the Geometry (The Labeling)</a></li>
-<li><a href="#_step_3_verify_discovery_nfd">Step 3: Verify Discovery (NFD)</a></li>
-<li><a href="#_step_4_the_hardware_profile">Step 4: The Hardware Profile</a></li>
-<li><a href="#_lab_the_hard_partition">Lab: The "Hard" Partition</a></li>
-<li><a href="#_summary_which_strategy">Summary: Which Strategy?</a></li>
-<li><a href="#_next_steps">Next Steps</a></li>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_prerequisites"><a class="anchor" href="#_prerequisites"></a>Prerequisites</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Access:</strong> OpenShift CLI (<code>oc</code>) with <code>cluster-admin</code>.</p>
+</li>
+<li>
+<p><strong>Target:</strong> A node with an NVIDIA GPU (L40S, A100, or T4).</p>
+</li>
+<li>
+<p><strong>Operator:</strong> NVIDIA GPU Operator installed.</p>
+</li>
 </ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_concept_the_apartment_complex"><a class="anchor" href="#_concept_the_apartment_complex"></a>Concept: The Apartment Complex</h2>
+<h2 id="_step_1_define_the_slicing_policy_the_blueprint"><a class="anchor" href="#_step_1_define_the_slicing_policy_the_blueprint"></a>Step 1: Define the Slicing Policy (The Blueprint)</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>If Time-Slicing is a gym where everyone shares the equipment, MIG is an apartment complex.</p>
+<p>The GPU Operator does not guess your density requirements. You must define them in a <code>ConfigMap</code>. We will define a policy named <code>high-density-slice</code> that splits the GPU into 4 replicas.</p>
 </div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Create the Configuration:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: nvidia-gpu-operator
+data:
+  high-density-slice: |-  # &lt;1&gt; The Policy Name
+    version: v1
+    sharing:
+      timeSlicing:
+        resources:
+        - name: nvidia.com/gpu
+          replicas: 4         # &lt;2&gt; The Multiplier (1 GPU = 4 Virtual)</code></pre>
+</div>
+</div>
+</li>
+<li>
+<p><strong>Apply the Blueprint:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc apply -f time-slicing-config.yaml</code></pre>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_2_activate_the_engine_clusterpolicy"><a class="anchor" href="#_step_2_activate_the_engine_clusterpolicy"></a>Step 2: Activate the Engine (ClusterPolicy)</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>+
- * <strong>The Structure:</strong> You take one building (The A100) and build permanent walls to create 7 distinct apartments.
- * <strong>The Isolation:</strong> If a fire starts in Apartment 1 (a process crashes), the residents in Apartment 2 are completely safe. They don&#8217;t share air (Compute) or space (Memory).
- * <strong>The Cost:</strong> You cannot change the walls instantly. Renovating (repartitioning) takes time and requires the building to be empty.</p>
+<p>The blueprint exists, but the factory isn&#8217;t using it yet. We must update the global <code>ClusterPolicy</code> to enable the <code>devicePlugin</code> configuration.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Edit the ClusterPolicy:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc edit clusterpolicy gpu-cluster-policy</code></pre>
+</div>
+</div>
+</li>
+<li>
+<p><strong>Inject the Configuration:</strong>
+Locate the <code>devicePlugin</code> section and update it to reference your new map.</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">spec:
+  devicePlugin:
+    config:
+      name: time-slicing-config  # &lt;1&gt; Must match ConfigMap name
+      default: high-density-slice # &lt;2&gt; The default policy from Step 1</code></pre>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_step_3_target_the_machinery_labeling"><a class="anchor" href="#_step_3_target_the_machinery_labeling"></a>Step 3: Target the Machinery (Labeling)</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>In a real factory, not every machine runs the same process. We use <strong>Node Labels</strong> to tell the Operator which specific nodes should be sliced.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Identify your L40S Node:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc get nodes -l nvidia.com/gpu.product=NVIDIA-L40S</code></pre>
+</div>
+</div>
+</li>
+<li>
+<p><strong>Apply the Instruction Label:</strong>
+This label triggers the Operator to reconfigure the Docker runtime and Device Plugin on this specific host.</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc label node &lt;node-name&gt; nvidia.com/device-plugin.config=high-density-slice</code></pre>
+</div>
+</div>
+</li>
+</ol>
 </div>
 <div class="admonitionblock note">
 <table>
@@ -146,9 +240,9 @@ While Time-Slicing increases density, it sacrifices isolation. For production wo
 <i class="fa icon-note" title="Note"></i>
 </td>
 <td class="content">
-<div class="title">Hardware Requirements</div>
+<div class="title">The Reconfiguration Event</div>
 <div class="paragraph">
-<p>MIG is only supported on NVIDIA Ampere (A100, A30) and Hopper (H100) architectures. You cannot use MIG on T4, V100, or older cards.</p>
+<p>The GPU Operator will detect this label change. It will restart the <code>nvidia-device-plugin</code> pod on that node. This usually takes 15-30 seconds. Existing workloads may be disrupted—always perform this on maintenance windows.</p>
 </div>
 </td>
 </tr>
@@ -157,215 +251,57 @@ While Time-Slicing increases density, it sacrifices isolation. For production wo
 </div>
 </div>
 <div class="sect1">
-<h2 id="_step_1_enable_the_mig_strategy"><a class="anchor" href="#_step_1_enable_the_mig_strategy"></a>Step 1: Enable the MIG Strategy</h2>
+<h2 id="_step_4_quality_assurance_verification"><a class="anchor" href="#_step_4_quality_assurance_verification"></a>Step 4: Quality Assurance (Verification)</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>By default, the NVIDIA GPU Operator assumes you want "Single" mode (one user gets the whole card). We must update the <code>ClusterPolicy</code> to allow for "Mixed" usage.</p>
+<p>We must verify that the "Inventory System" (Node Feature Discovery) sees the new capacity.</p>
 </div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: nvidia.com/v1
-kind: ClusterPolicy
-metadata:
-  name: gpu-cluster-policy
-spec:
-  # 1. Enable Mixed Strategy
-  # 'mixed' allows you to have different slice sizes on the same node
-  # 'single' forces the entire node to have the exact same slice size
-  migStrategy: mixed
-
-  # 2. Disable Time-Slicing
-  # You generally do not mix Time-Slicing and MIG on the same node
-  devicePlugin:
-    config:
-      name: ""</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>Once applied, the Operator will restart the device plugin monitor, but <strong>no slicing happens yet.</strong> The operator is simply "ready" to receive orders.</p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_2_define_the_geometry_the_labeling"><a class="anchor" href="#_step_2_define_the_geometry_the_labeling"></a>Step 2: Define the Geometry (The Labeling)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Unlike Time-Slicing (which uses a ConfigMap), MIG is controlled by <strong>Node Labels</strong>. The GPU Operator watches your nodes for a specific label key: <code>nvidia.com/mig.config</code>.</p>
-</div>
-<div class="paragraph">
-<p>To split an A100 into 7 small slices (1 compute unit, 5GB memory each), you label the node:</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc label node &lt;node-name&gt; nvidia.com/mig.config=all-1g.5gb</code></pre>
-</div>
-</div>
-<div class="admonitionblock warning">
-<table>
-<tr>
-<td class="icon">
-<i class="fa icon-warning" title="Warning"></i>
-</td>
-<td class="content">
-<div class="title">The Drain Event</div>
-<div class="paragraph">
-<p>Changing the MIG configuration involves resetting the GPU hardware.
-1. The Operator will <strong>drain</strong> the node (evict all running pods).
-2. It will apply the MIG geometry.
-3. It will uncordon the node.
-<strong>Always perform this action during a maintenance window.</strong></p>
-</div>
-</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_3_verify_discovery_nfd"><a class="anchor" href="#_step_3_verify_discovery_nfd"></a>Step 3: Verify Discovery (NFD)</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Once the node comes back online, Node Feature Discovery (NFD) will see the new hardware reality. Instead of seeing <code>nvidia.com/gpu</code>, it will see specific <strong>MIG Profiles</strong>.</p>
-</div>
-<div class="paragraph">
-<p>Run the discovery command:</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc describe node &lt;node-name&gt;</code></pre>
-</div>
-</div>
-<div class="listingblock">
-<div class="title">Output: The New Capacity</div>
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-text hljs" data-lang="text">Capacity:
-  nvidia.com/mig-1g.5gb: 7  <i class="conum" data-value="1"></i><b>(1)</b>
-  nvidia.com/gpu: 0         <i class="conum" data-value="2"></i><b>(2)</b></code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>The New Resource:</strong> The node now advertises 7 units of <code>1g.5gb</code>.</td>
-</tr>
-<tr>
-<td><i class="conum" data-value="2"></i><b>2</b></td>
-<td><strong>The Old Resource:</strong> The generic "GPU" count drops to 0. You can no longer request a "whole GPU" on this node.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_step_4_the_hardware_profile"><a class="anchor" href="#_step_4_the_hardware_profile"></a>Step 4: The Hardware Profile</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>This is where the user experience differs from Time-Slicing. Because the resource name has changed (from <code>gpu</code> to <code>mig-1g.5gb</code>), your Hardware Profile must ask for that <strong>exact</strong> name.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: dashboard.opendatahub.io/v1alpha1
-kind: HardwareProfile
-metadata:
-  name: nvidia-mig-1g-5gb
-  namespace: redhat-ods-applications
-spec:
-  displayName: "NVIDIA A100 - Small Slice (MIG)"
-  description: "Dedicated 5GB vRAM. 1 Compute Unit. Fully isolated."
-  identifiers:
-    - identifier: nvidia.com/mig-1g.5gb  <i class="conum" data-value="1"></i><b>(1)</b>
-      count: 1
-  tolerations:
-    - key: "nvidia.com/gpu"
-      operator: "Exists"
-      effect: "NoSchedule"</code></pre>
-</div>
-</div>
-<div class="colist arabic">
-<table>
-<tr>
-<td><i class="conum" data-value="1"></i><b>1</b></td>
-<td><strong>Precision Matters:</strong> You must match the string exactly as NFD presents it. Common sizes include <code>1g.5gb</code>, <code>2g.10gb</code>, and <code>3g.20gb</code>.</td>
-</tr>
-</table>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_lab_the_hard_partition"><a class="anchor" href="#_lab_the_hard_partition"></a>Lab: The "Hard" Partition</h2>
-<div class="sectionbody">
 <div class="olist arabic">
 <ol class="arabic">
 <li>
-<p>Edit the <code>ClusterPolicy</code> to set <code>migStrategy: mixed</code>.</p>
+<p><strong>Inspect the Node Capacity:</strong></p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-bash hljs" data-lang="bash">oc describe node &lt;node-name&gt; | grep "nvidia.com/gpu"</code></pre>
+</div>
+</div>
 </li>
 <li>
-<p>Identify an A100 node in your cluster.</p>
-</li>
-<li>
-<p>Apply the label: <code>oc label node &lt;node&gt; nvidia.com/mig.config=all-1g.5gb</code>.</p>
-</li>
-<li>
-<p><strong>Wait:</strong> Monitor the node status. It will briefly go <code>NotReady</code> or <code>SchedulingDisabled</code>.</p>
-</li>
-<li>
-<p>Verify with <code>oc describe node</code>.</p>
-</li>
-<li>
-<p>Create a "Small Slice" Hardware Profile and launch a workbench.</p>
+<p><strong>Validate the Output:</strong>
+You should see that the capacity has quadrupled.</p>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-text hljs" data-lang="text">Capacity:
+  nvidia.com/gpu: 4  <i class="conum" data-value="1"></i><b>(1)</b>
+Allocatable:
+  nvidia.com/gpu: 4</code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td><strong>Success:</strong> The node now advertises 4 available slots. Kubernetes will allow 4 separate pods to request <code>nvidia.com/gpu: 1</code> on this single node.</td>
+</tr>
+</table>
+</div>
 </li>
 </ol>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_summary_which_strategy"><a class="anchor" href="#_summary_which_strategy"></a>Summary: Which Strategy?</h2>
-<div class="sectionbody">
-<table class="tableblock frame-all grid-all stretch">
-<colgroup>
-<col style="width: 33.3333%;">
-<col style="width: 33.3333%;">
-<col style="width: 33.3334%;">
-</colgroup>
-<thead>
-<tr>
-<th class="tableblock halign-left valign-top">Feature</th>
-<th class="tableblock halign-left valign-top">Time-Slicing (Module 2)</th>
-<th class="tableblock halign-left valign-top">MIG (Module 3)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Isolation</strong></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Low (Shared Memory)</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">High (Hardware Partition)</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Flexibility</strong></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Instant (Software Config)</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Slow (Requires Node Drain)</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Resource Name</strong></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><code>nvidia.com/gpu</code></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><code>nvidia.com/mig-Xg.Ygb</code></p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Best For</strong></p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Dev, Notebooks, Code</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Inference, Secure Training</p></td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_next_steps"><a class="anchor" href="#_next_steps"></a>Next Steps</h2>
+<h2 id="_technical_summary"><a class="anchor" href="#_technical_summary"></a>Technical Summary</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>You have built the engine. Now, how do you verify it works?
-Proceed to <strong>Module 4: Validation &amp; Troubleshooting</strong>.</p>
+<p>You have successfully decoupled the logical capacity from the physical hardware.
+* <strong>Input:</strong> 1x NVIDIA L40S.
+* <strong>Process:</strong> Applied Time-Slicing Policy.
+* <strong>Output:</strong> 4x Virtual GPUs ready for assignment.</p>
+</div>
+<hr>
+<div class="paragraph">
+<p><strong>The Supply is ready. Proceed to the next section to implement the Governance Layer (Kueue).</strong></p>
 </div>
 </div>
 </div>
