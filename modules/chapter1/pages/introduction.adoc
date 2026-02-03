@@ -25,7 +25,7 @@ The goal of this deployment is to shift GPU management from "ticket-based provis
 
 You will engineer a supply chain that decouples **Physical Supply** from **Logical Demand**.
 
-image::gpu_architecture_diagram.png[align="center", title="GPU-as-a-Service Architecture: Decoupling Infrastructure from Consumption"]
+image::gpuasaarch.png[align="center", title="GPU-as-a-Service Architecture: Decoupling Infrastructure from Consumption"]
 
 === 1. The Virtualization Layer (Supply)
 * **The Asset:** A configured **NVIDIA GPU Operator** with Time-Slicing or MIG policies.
