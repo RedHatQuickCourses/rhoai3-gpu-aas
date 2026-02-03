@@ -2,4 +2,4 @@
 :navtitle: Home
 :imagesdir: ../chapter1/images
 
-include::chapter1:index.adoc[]
+include::chapter1:introduction.adoc[]
