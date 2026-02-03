@@ -1,125 +1,135 @@
-= Lab: Configuring the Virtualization Layer (Supply)
-:navtitle: Supply Lab: Time-Slicing
+= Lab: Enabling the Governance Layer (Control & Demand)
+:navtitle: Governance Lab: Kueue & Profiles
 :toc: macro
 
 // Antora metadata
 :page-role: hands-on-lab
-:description: Implementing GPU Time-Slicing on NVIDIA L40S nodes to maximize density.
+:description: Configuring Kueue resource flavors and deploying the user-facing Hardware Profile.
 
 [.lead]
-*Raw hardware is inefficient. We must virtualize the asset to maximize throughput.*
+*Capacity without control is just chaos. We must now install the traffic controller.*
 
-In this lab, you assume the role of the **Infrastructure Engineer**. Your objective is to take a physical NVIDIA L40S (48GB VRAM) and reconfigure it to support multiple concurrent inference workloads.
+In the previous lab, you created 4x virtual GPUs per node. In this lab, you assume the role of the **Platform Admin**. Your objective is to expose these resources to users via a governed "Vending Machine."
 
-We will implement a **Time-Slicing Strategy**. By instructing the driver to interleave processes, we will transform 1 physical GPU into 4 logical accelerators, each capable of running a 7B parameter model.
+We will configure **Kueue** to manage the quota and deploy a **Hardware Profile** that allows users to request these slices without knowing the underlying complexity.
 
 == Prerequisites
-* **Access:** OpenShift CLI (`oc`) with `cluster-admin`.
-* **Target:** A node with an NVIDIA GPU (L40S, A100, or T4).
-* **Operator:** NVIDIA GPU Operator installed.
+* **Supply:** You have completed Section 2 (Nodes are advertising `nvidia.com/gpu: 4`).
+* **Kueue:** The Kueue Operator is installed and set to `Managed` or `Unmanaged`.
 
-== Step 1: Define the Slicing Policy (The Blueprint)
-The GPU Operator does not guess your density requirements. You must define them in a `ConfigMap`. We will define a policy named `high-density-slice` that splits the GPU into 4 replicas.
+== Step 1: Initialize the Traffic Controller (Day 0 Config)
+By default, the RHOAI Dashboard hides the complex queuing options. We must enable them.
 
-. **Create the Configuration:**
+. **Enable Dashboard Queue UI:**
++
+[source,bash]
+----
+oc patch odhdashboardconfig odh-dashboard-config -n redhat-ods-applications \
+  --type=merge -p '{"spec":{"disableKueue": false}}'
+----
+
+. **Invite the Namespace:**
+Kueue only manages projects that are explicitly "invited." Label your target user namespace (e.g., `gpu-users`).
++
+[source,bash]
+----
+oc new-project gpu-users
+oc label namespace gpu-users kueue.openshift.io/managed=true
+----
+
+== Step 2: Define the Physical Flavor (ResourceFlavor)
+Kueue needs to know what "Standard GPU" actually means in terms of physical labels.
+
+. **Create the ResourceFlavor:**
+This object tells Kueue: "When I ask for 'default-flavor', I mean nodes with the label `nvidia.com/gpu`."
 +
 [source,yaml]
 ----
-apiVersion: v1
-kind: ConfigMap
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
 metadata:
-  name: time-slicing-config
-  namespace: nvidia-gpu-operator
-data:
-  high-density-slice: |-  # <1> The Policy Name
-    version: v1
-    sharing:
-      timeSlicing:
-        resources:
-        - name: nvidia.com/gpu
-          replicas: 4         # <2> The Multiplier (1 GPU = 4 Virtual)
+  name: default-flavor
+spec:
+  nodeLabels:
+    nvidia.com/gpu.product: NVIDIA-L40S # <1> Optional: Pin to specific hardware
+  tolerations:
+  - key: "nvidia.com/gpu" 
+    operator: "Exists"
 ----
 
-. **Apply the Blueprint:**
-+
-[source,bash]
-----
-oc apply -f time-slicing-config.yaml
-----
+== Step 3: Set the Quota (ClusterQueue)
+Now we define the limits. We will create a global queue that allows the cluster to consume the virtual slices we created.
 
-== Step 2: Activate the Engine (ClusterPolicy)
-The blueprint exists, but the factory isn't using it yet. We must update the global `ClusterPolicy` to enable the `devicePlugin` configuration.
-
-. **Edit the ClusterPolicy:**
-+
-[source,bash]
-----
-oc edit clusterpolicy gpu-cluster-policy
-----
-
-. **Inject the Configuration:**
-Locate the `devicePlugin` section and update it to reference your new map.
+. **Create the ClusterQueue:**
 +
 [source,yaml]
 ----
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: cluster-queue-gpu
 spec:
-  devicePlugin:
-    config:
-      name: time-slicing-config  # <1> Must match ConfigMap name
-      default: high-density-slice # <2> The default policy from Step 1
+  namespaceSelector: {} # <1> Open to all namespaces
+  resourceGroups:
+  - coveredResources: ["nvidia.com/gpu"]
+    flavors:
+    - name: default-flavor
+      resources:
+      - name: "nvidia.com/gpu"
+        nominalQuota: 10 # <2> Guaranteed slots
+        borrowingLimit: 10 # <3> Extra burstable slots
 ----
 
-== Step 3: Target the Machinery (Labeling)
-In a real factory, not every machine runs the same process. We use **Node Labels** to tell the Operator which specific nodes should be sliced.
+== Step 4: Build the Bridge (LocalQueue)
+Users cannot see the global ClusterQueue. We must create a "Local Queue" inside their project that connects to the main supply.
 
-. **Identify your L40S Node:**
+. **Create the LocalQueue:**
 +
-[source,bash]
+[source,yaml]
 ----
-oc get nodes -l nvidia.com/gpu.product=NVIDIA-L40S
-----
-
-. **Apply the Instruction Label:**
-This label triggers the Operator to reconfigure the Docker runtime and Device Plugin on this specific host.
-+
-[source,bash]
-----
-oc label node <node-name> nvidia.com/device-plugin.config=high-density-slice
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  namespace: gpu-users
+  name: local-queue-gpu
+spec:
+  clusterQueue: cluster-queue-gpu
 ----
 
-[NOTE]
-.The Reconfiguration Event
+== Step 5: Publish the Menu (Hardware Profile)
+Finally, we create the UI button.
+
+[IMPORTANT]
+.Critical Architecture Note
 ====
-The GPU Operator will detect this label change. It will restart the `nvidia-device-plugin` pod on that node. This usually takes 15-30 seconds. Existing workloads may be disrupted—always perform this on maintenance windows.
+Because we are using Kueue, this Hardware Profile **must not** contain `nodeSelectors` or `tolerations`. It serves only as a pointer to the queue.
 ====
 
-== Step 4: Quality Assurance (Verification)
-We must verify that the "Inventory System" (Node Feature Discovery) sees the new capacity.
-
-. **Inspect the Node Capacity:**
+. **Create the Hardware Profile:**
 +
-[source,bash]
+[source,yaml]
 ----
-oc describe node <node-name> | grep "nvidia.com/gpu"
+apiVersion: dashboard.opendatahub.io/v1alpha1
+kind: HardwareProfile
+metadata:
+  name: profile-l40s-slice
+  namespace: redhat-ods-applications
+spec:
+  displayName: "NVIDIA L40S (Time-Sliced)"
+  description: "Shared GPU segment. Good for inference and light training."
+  identifiers:
+    - identifier: nvidia.com/gpu
+      count: 1
+  # No selectors here. Kueue handles placement.
 ----
 
-. **Validate the Output:**
-You should see that the capacity has quadrupled.
-+
-[source,text]
-----
-Capacity:
-  nvidia.com/gpu: 4  <1>
-Allocatable:
-  nvidia.com/gpu: 4
-----
-<1> **Success:** The node now advertises 4 available slots. Kubernetes will allow 4 separate pods to request `nvidia.com/gpu: 1` on this single node.
-
-== Technical Summary
-You have successfully decoupled the logical capacity from the physical hardware.
-* **Input:** 1x NVIDIA L40S.
-* **Process:** Applied Time-Slicing Policy.
-* **Output:** 4x Virtual GPUs ready for assignment.
+== Step 6: The "Payoff" (Verification)
+1. Log in to the RHOAI Dashboard.
+2. Go to **Data Science Projects** -> **gpu-users**.
+3. Create a Workbench.
+4. Select the **"NVIDIA L40S (Time-Sliced)"** accelerator.
+5. **Success:** The Pod launches.
+   * *Under the hood:* Kueue intercepted the request, checked the quota in `cluster-queue-gpu`, assigned `default-flavor`, and the Scheduler placed it on one of your 4 virtual slices.
 
 ---
-*The Supply is ready. Proceed to the next section to implement the Governance Layer (Kueue).*
+*Mission Accomplished. You have successfully deployed an end-to-end GPU-as-a-Service architecture.*
