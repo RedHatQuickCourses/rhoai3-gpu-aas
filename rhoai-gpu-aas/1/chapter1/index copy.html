@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <meta name="generator" content="Antora 3.1.3">
+    <link rel="stylesheet" href="../../../_/css/site.css">
+    <script>var uiRootPath = '../../../_'</script>
+  </head>
+  <body class="article">
+<header class="header">
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <a class="navbar-item" href="https://www.redhat.com" target="_blank"><img src="../../../_/img/redhat-logo.png" height="40px" alt="Red Hat"></a>
+      <a class="navbar-item" style="font-size: 24px; color: white" href="../../..">GPU as a Service on Red Hat OpenShift AI 3.2</a>
+      <button class="navbar-burger" data-target="topbar-nav">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+    <div id="topbar-nav" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item" href="https://github.com/RedHatQuickCourses/REPLACEREPONAME/issues" target="_blank">Report Issues</a>
+      </div>
+    </div>
+  </nav>
+</header>
+<div class="body">
+<div class="nav-container" data-component="rhoai-gpu-aas" data-version="1">
+  <aside class="nav">
+    <div class="panels">
+<div class="nav-panel-menu is-active" data-panel="menu">
+  <nav class="nav-menu">
+    <h3 class="title"><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></h3>
+<ul class="nav-list">
+  <li class="nav-item" data-depth="0">
+<ul class="nav-list">
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="../index.html">Home</a>
+  </li>
+</ul>
+  </li>
+  <li class="nav-item" data-depth="0">
+<ul class="nav-list">
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="section1.html">Configuring Time-Slicing</a>
+  </li>
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="section2.html">Configuring MIG</a>
+  </li>
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="section3.html">Validation &amp; Troubleshooting</a>
+  </li>
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="section4.html">Governance &amp; Quotas</a>
+  </li>
+  <li class="nav-item" data-depth="1">
+    <a class="nav-link" href="section5.html">Multi-GPU Aggregation</a>
+  </li>
+</ul>
+  </li>
+</ul>
+  </nav>
+</div>
+<div class="nav-panel-explore" data-panel="explore">
+  <div class="context">
+    <span class="title">GPU as a Service on Red Hat OpenShift AI 3.2</span>
+    <span class="version">1</span>
+  </div>
+  <ul class="components">
+    <li class="component is-current">
+      <a class="title" href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a>
+      <ul class="versions">
+        <li class="version is-current is-latest">
+          <a href="../index.html">1</a>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</div>
+    </div>
+  </aside>
+</div>
+<main class="article">
+<div class="toolbar" role="navigation">
+<button class="nav-toggle"></button>
+  <a href="../index.html" class="home-link"></a>
+<nav class="breadcrumbs" aria-label="breadcrumbs">
+  <ul>
+    <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
+    <li><a href="index%20copy.html">GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG</a></li>
+  </ul>
+</nav>
+</div>
+  <div class="content">
+<aside class="toc sidebar" data-title="Contents" data-levels="2">
+  <div class="toc-menu"></div>
+</aside>
+<article class="doc">
+<h1 class="page">GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG</h1>
+<div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p><strong>Unlock the hidden capacity in your data center. Turn one physical GPU into seven virtual accelerators.</strong></p>
+</div>
+<div class="quoteblock abstract">
+<blockquote>
+You have spent the budget on NVIDIA A100s or H100s, but your monitoring dashboards tell a painful story: <strong>Low Utilization.</strong> This module teaches you how to architect a "GPU-as-a-Service" model using Red Hat OpenShift AI (RHOAI), the NVIDIA GPU Operator, and Node Feature Discovery (NFD).
+</blockquote>
+</div>
+<div id="toc" class="toc">
+<div id="toctitle" class="title">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_the_utilization_gap">The Utilization Gap</a></li>
+<li><a href="#_the_solution_virtualizing_the_accelerator">The Solution: Virtualizing the Accelerator</a></li>
+<li><a href="#_the_architecture_how_it_works">The Architecture: How It Works</a></li>
+<li><a href="#_technical_preview_the_clusterpolicy">Technical Preview: The ClusterPolicy</a></li>
+<li><a href="#_next_steps">Next Steps</a></li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_the_utilization_gap"><a class="anchor" href="#_the_utilization_gap"></a>The Utilization Gap</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>In a standard Kubernetes environment, a GPU is a "monolithic" resource. If a data scientist requests a GPU for a Jupyter notebook to write code, Kubernetes assigns them the <em>entire</em> physical card.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Cost:</strong> That user might only use 2GB of VRAM and 5% of the compute cores.</p>
+</li>
+<li>
+<p><strong>The Waste:</strong> The remaining 75GB of memory and 95% of compute power sits idle, locked away from other users.</p>
+</li>
+<li>
+<p><strong>The Result:</strong> You run out of allocatable GPUs while your actual hardware sits empty.</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_the_solution_virtualizing_the_accelerator"><a class="anchor" href="#_the_solution_virtualizing_the_accelerator"></a>The Solution: Virtualizing the Accelerator</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>To solve this, we move from "Physical Allocation" to "Virtual Allocation." RHOAI supports two primary methods for slicing GPUs, allowing you to squeeze 4x to 7x more users onto the same hardware.</p>
+</div>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Strategy A: Time-Slicing (The "Soft" Cut)</th>
+<th class="tableblock halign-left valign-top">Strategy B: MIG (The "Hard" Cut)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>What it is:</strong> Software-level oversubscription. The GPU context-switches between processes very quickly.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>What it is:</strong> Hardware-level partitioning. The GPU is electrically divided into distinct instances.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Isolation:</strong> Shared Memory (Low Isolation). One user&#8217;s OOM error can crash the GPU.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Isolation:</strong> Dedicated Memory (High Isolation). Faults are contained within the slice.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Best For:</strong> Development, Classrooms, Notebooks, Code Generation.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Best For:</strong> Production Inference, Stable Training, Multi-tenant SaaS.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_the_architecture_how_it_works"><a class="anchor" href="#_the_architecture_how_it_works"></a>The Architecture: How It Works</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This course will guide you through the three layers required to build this engine:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>The Slicer (NVIDIA GPU Operator):</strong>
+You will configure the <code>ClusterPolicy</code> to tell the driver how to present the hardware (e.g., "Split this A100 into 7 slices").</p>
+</li>
+<li>
+<p><strong>The Advertiser (Node Feature Discovery - NFD):</strong>
+Once sliced, NFD automatically detects the new virtual resources and labels the nodes.</p>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Before:</strong> <code>nvidia.com/gpu: 1</code></p>
+</li>
+<li>
+<p><strong>After:</strong> <code>nvidia.com/mig-1g.5gb: 7</code></p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p><strong>The Vending Machine (Hardware Profiles):</strong>
+You will create RHOAI Hardware Profiles that target these specific NFD labels, allowing users to select "Small Slice" from a dropdown menu.</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_technical_preview_the_clusterpolicy"><a class="anchor" href="#_technical_preview_the_clusterpolicy"></a>Technical Preview: The ClusterPolicy</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>You asked: <strong>How do we actually turn this on?</strong></p>
+</div>
+<div class="paragraph">
+<p>In the upcoming "Hands-On" modules, we will be editing the <strong>ClusterPolicy</strong> Custom Resource. Here is a preview of the configuration we will apply to enable these features.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  # 1. ENABLING MIG (The "Hard" Cut)
+  # 'mixed' allows a node to run different sized slices simultaneously
+  migStrategy: mixed
+
+  # 2. ENABLING TIME-SLICING (The "Soft" Cut)
+  # We reference a ConfigMap that defines how many replicas to create
+  devicePlugin:
+    config:
+      name: time-slicing-config
+      default: available  # Applies to GPUs not covered by specific configs</code></pre>
+</div>
+</div>
+<div class="admonitionblock important">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-important" title="Important"></i>
+</td>
+<td class="content">
+<div class="title">Prerequisites</div>
+<div class="paragraph">
+<p>To complete the labs in this course, you will need:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Cluster Admin access</strong> to an OpenShift AI 3.x cluster.</p>
+</li>
+<li>
+<p><strong>NVIDIA GPUs</strong> (Pascal architecture or newer for Time-Slicing; Ampere A100/H100 for MIG).</p>
+</li>
+<li>
+<p>The <strong>OpenShift CLI (<code>oc</code>)</strong>.</p>
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_next_steps"><a class="anchor" href="#_next_steps"></a>Next Steps</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Ready to stop the waste?</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Proceed to <strong>Module 2: Configuring Time-Slicing</strong> for the quickest win.</p>
+</li>
+<li>
+<p>Jump to <strong>Module 3: Configuring MIG</strong> for advanced isolation.</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</article>
+  </div>
+</main>
+</div>
+<footer class="footer">
+  <img src="../../../_/img/rhl-logo-red.png" height="40px" alt="Red Hat"  href="https://redhat.com" >
+</footer><script id="site-script" src="../../../_/js/site.js" data-ui-root-path="../../../_"></script>
+<script async src="../../../_/js/vendor/highlight.js"></script>
+  </body>
+</html>

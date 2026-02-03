@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
+    <title>Building a Scalable GPU-as-a-Service Platform :: GPU as a Service on Red Hat OpenShift AI 3.2</title>
     <meta name="generator" content="Antora 3.1.3">
     <link rel="stylesheet" href="../../../_/css/site.css">
     <script>var uiRootPath = '../../../_'</script>
@@ -90,7 +90,7 @@
 <nav class="breadcrumbs" aria-label="breadcrumbs">
   <ul>
     <li><a href="../index.html">GPU as a Service on Red Hat OpenShift AI 3.2</a></li>
-    <li><a href="index.html">GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG</a></li>
+    <li><a href="index.html">Building a Scalable GPU-as-a-Service Platform</a></li>
   </ul>
 </nav>
 </div>
@@ -99,145 +99,121 @@
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-<h1 class="page">GPU-as-a-Service: Optimizing ROI with Slicing &amp; MIG</h1>
+<h1 class="page">Building a Scalable GPU-as-a-Service Platform</h1>
 <div id="preamble">
 <div class="sectionbody">
+<div class="paragraph lead">
+<p><strong>Transform static infrastructure into a dynamic, governed AI service.</strong></p>
+</div>
 <div class="paragraph">
-<p><strong>Unlock the hidden capacity in your data center. Turn one physical GPU into seven virtual accelerators.</strong></p>
+<p>In enterprise AI environments, the primary infrastructure challenge is maximizing the utilization of high-cost GPU accelerators while ensuring equitable access for diverse workloads. Static 1:1 allocation models—where a single developer locks an entire physical GPU for lightweight tasks—result in resource contention, idle capacity, and inflated infrastructure costs.</p>
 </div>
-<div class="quoteblock abstract">
-<blockquote>
-You have spent the budget on NVIDIA A100s or H100s, but your monitoring dashboards tell a painful story: <strong>Low Utilization.</strong> This module teaches you how to architect a "GPU-as-a-Service" model using Red Hat OpenShift AI (RHOAI), the NVIDIA GPU Operator, and Node Feature Discovery (NFD).
-</blockquote>
-</div>
-<div id="toc" class="toc">
-<div id="toctitle" class="title">Table of Contents</div>
-<ul class="sectlevel1">
-<li><a href="#_the_utilization_gap">The Utilization Gap</a></li>
-<li><a href="#_the_solution_virtualizing_the_accelerator">The Solution: Virtualizing the Accelerator</a></li>
-<li><a href="#_the_architecture_how_it_works">The Architecture: How It Works</a></li>
-<li><a href="#_technical_preview_the_clusterpolicy">Technical Preview: The ClusterPolicy</a></li>
-<li><a href="#_next_steps">Next Steps</a></li>
-</ul>
+<div class="paragraph">
+<p>This course details the architecture and configuration required to deploy <strong>GPU-as-a-Service</strong> using Red Hat OpenShift AI. You will move beyond manual pod pinning to build an automated allocation engine that optimizes hardware density and enforces usage quotas at scale.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_the_utilization_gap"><a class="anchor" href="#_the_utilization_gap"></a>The Utilization Gap</h2>
+<h2 id="_the_core_objective_optimization_at_scale"><a class="anchor" href="#_the_core_objective_optimization_at_scale"></a>The Core Objective: Optimization at Scale</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>In a standard Kubernetes environment, a GPU is a "monolithic" resource. If a data scientist requests a GPU for a Jupyter notebook to write code, Kubernetes assigns them the <em>entire</em> physical card.</p>
+<p>The goal of this deployment is to shift GPU management from "ticket-based provisioning" to "self-service governance." By implementing this architecture, you deliver three key outcomes:</p>
 </div>
 <div class="ulist">
 <ul>
 <li>
-<p><strong>The Cost:</strong> That user might only use 2GB of VRAM and 5% of the compute cores.</p>
+<p><strong>Maximize Utilization (Density):</strong> Partition physical GPUs (e.g., NVIDIA L40S or A100) into smaller, functional units to support 4x–7x more concurrent users on existing hardware.</p>
 </li>
 <li>
-<p><strong>The Waste:</strong> The remaining 75GB of memory and 95% of compute power sits idle, locked away from other users.</p>
+<p><strong>Enforce Fairness (Governance):</strong> Implement a global queuing system that manages priority and preemption, preventing resource hoarding by single tenants.</p>
 </li>
 <li>
-<p><strong>The Result:</strong> You run out of allocatable GPUs while your actual hardware sits empty.</p>
+<p><strong>Streamline Consumption (Velocity):</strong> Abstract complex node topology (Taints, NVLink requirements) into standardized "Hardware Profiles" that simplify user access.</p>
 </li>
 </ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_the_solution_virtualizing_the_accelerator"><a class="anchor" href="#_the_solution_virtualizing_the_accelerator"></a>The Solution: Virtualizing the Accelerator</h2>
+<h2 id="_the_solution_architecture"><a class="anchor" href="#_the_solution_architecture"></a>The Solution Architecture</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>To solve this, we move from "Physical Allocation" to "Virtual Allocation." RHOAI supports two primary methods for slicing GPUs, allowing you to squeeze 4x to 7x more users onto the same hardware.</p>
+<p>You will engineer a supply chain that decouples <strong>Physical Supply</strong> from <strong>Logical Demand</strong>.</p>
 </div>
-<table class="tableblock frame-all grid-all stretch">
-<colgroup>
-<col style="width: 50%;">
-<col style="width: 50%;">
-</colgroup>
-<thead>
-<tr>
-<th class="tableblock halign-left valign-top">Strategy A: Time-Slicing (The "Soft" Cut)</th>
-<th class="tableblock halign-left valign-top">Strategy B: MIG (The "Hard" Cut)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>What it is:</strong> Software-level oversubscription. The GPU context-switches between processes very quickly.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>What it is:</strong> Hardware-level partitioning. The GPU is electrically divided into distinct instances.</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Isolation:</strong> Shared Memory (Low Isolation). One user&#8217;s OOM error can crash the GPU.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Isolation:</strong> Dedicated Memory (High Isolation). Faults are contained within the slice.</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Best For:</strong> Development, Classrooms, Notebooks, Code Generation.</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>Best For:</strong> Production Inference, Stable Training, Multi-tenant SaaS.</p></td>
-</tr>
-</tbody>
-</table>
+<div class="imageblock text-center">
+<div class="content">
+<img src="_images/gpuasaarch.png" alt="gpuasaarch">
+</div>
+<div class="title">Figure 1. GPU-as-a-Service Architecture: Decoupling Infrastructure from Consumption</div>
+</div>
+<div class="sect2">
+<h3 id="_1_the_virtualization_layer_supply"><a class="anchor" href="#_1_the_virtualization_layer_supply"></a>1. The Virtualization Layer (Supply)</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Asset:</strong> A configured <strong>NVIDIA GPU Operator</strong> with Time-Slicing or MIG policies.</p>
+</li>
+<li>
+<p><strong>The Function:</strong> Breaks monolithic hardware into usable fractions.</p>
+</li>
+<li>
+<p><strong>The Example:</strong> Instead of dedicating a full <strong>NVIDIA L40S (48GB)</strong> to a single Jupyter notebook, you apply a <strong>Time-Slicing Policy</strong> to create 4 logical replicas (12GB virtual VRAM each), quadrupling the serving capacity for inference workloads.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_2_the_governance_layer_control"><a class="anchor" href="#_2_the_governance_layer_control"></a>2. The Governance Layer (Control)</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Asset:</strong> <strong>Kueue</strong> Resource Flavors and Cluster Queues.</p>
+</li>
+<li>
+<p><strong>The Function:</strong> Acts as the arbitration engine. It intercepts pod requests, evaluates available quota, and queues lower-priority jobs during peak contention.</p>
+</li>
+<li>
+<p><strong>The Outcome:</strong> Guaranteed access for critical training jobs while backfilling idle cycles with lower-priority development work.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_3_the_service_layer_demand"><a class="anchor" href="#_3_the_service_layer_demand"></a>3. The Service Layer (Demand)</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>The Asset:</strong> <strong>Hardware Profile</strong> Custom Resources (CRs).</p>
+</li>
+<li>
+<p><strong>The Function:</strong> The user-facing catalog entry. It maps a business requirement (e.g., "Standard Inference") to the underlying infrastructure labels and queue policies.</p>
+</li>
+<li>
+<p><strong>The Outcome:</strong> Data scientists deploy standard configurations without needing to understand Kubernetes taints, tolerations, or resource limits.</p>
+</li>
+</ul>
+</div>
+</div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_the_architecture_how_it_works"><a class="anchor" href="#_the_architecture_how_it_works"></a>The Architecture: How It Works</h2>
+<h2 id="_deployment_scope"><a class="anchor" href="#_deployment_scope"></a>Deployment Scope</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>This course will guide you through the three layers required to build this engine:</p>
+<p>In this course, you will act as the Platform Engineer responsible for industrializing the GPU fleet. You will execute the following infrastructure tasks:</p>
 </div>
 <div class="olist arabic">
 <ol class="arabic">
 <li>
-<p><strong>The Slicer (NVIDIA GPU Operator):</strong>
-You will configure the <code>ClusterPolicy</code> to tell the driver how to present the hardware (e.g., "Split this A100 into 7 slices").</p>
+<p><strong>Define the Partitioning Strategy:</strong> Configure the GPU Operator to enable Time-Slicing on <strong>NVIDIA L40S</strong> nodes to support high-density concurrent users.</p>
 </li>
 <li>
-<p><strong>The Advertiser (Node Feature Discovery - NFD):</strong>
-Once sliced, NFD automatically detects the new virtual resources and labels the nodes.</p>
-<div class="ulist">
-<ul>
-<li>
-<p><strong>Before:</strong> <code>nvidia.com/gpu: 1</code></p>
+<p><strong>Implement Quota Management:</strong> Deploy <strong>Kueue</strong> to manage fair-share scheduling across multiple project namespaces.</p>
 </li>
 <li>
-<p><strong>After:</strong> <code>nvidia.com/mig-1g.5gb: 7</code></p>
-</li>
-</ul>
-</div>
-</li>
-<li>
-<p><strong>The Vending Machine (Hardware Profiles):</strong>
-You will create RHOAI Hardware Profiles that target these specific NFD labels, allowing users to select "Small Slice" from a dropdown menu.</p>
+<p><strong>Publish the Service Catalog:</strong> Create and validate <strong>Hardware Profiles</strong> that expose these managed resources to the OpenShift AI dashboard.</p>
 </li>
 </ol>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_technical_preview_the_clusterpolicy"><a class="anchor" href="#_technical_preview_the_clusterpolicy"></a>Technical Preview: The ClusterPolicy</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>You asked: <strong>How do we actually turn this on?</strong></p>
-</div>
-<div class="paragraph">
-<p>In the upcoming "Hands-On" modules, we will be editing the <strong>ClusterPolicy</strong> Custom Resource. Here is a preview of the configuration we will apply to enable these features.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: nvidia.com/v1
-kind: ClusterPolicy
-metadata:
-  name: gpu-cluster-policy
-spec:
-  # 1. ENABLING MIG (The "Hard" Cut)
-  # 'mixed' allows a node to run different sized slices simultaneously
-  migStrategy: mixed
-
-  # 2. ENABLING TIME-SLICING (The "Soft" Cut)
-  # We reference a ConfigMap that defines how many replicas to create
-  devicePlugin:
-    config:
-      name: time-slicing-config
-      default: available  # Applies to GPUs not covered by specific configs</code></pre>
-</div>
 </div>
 <div class="admonitionblock important">
 <table>
@@ -246,20 +222,23 @@ spec:
 <i class="fa icon-important" title="Important"></i>
 </td>
 <td class="content">
-<div class="title">Prerequisites</div>
+<div class="title">Technical Prerequisites</div>
 <div class="paragraph">
-<p>To complete the labs in this course, you will need:</p>
+<p>To execute the deployment steps in this guide, ensure your environment meets the following criteria:</p>
 </div>
 <div class="ulist">
 <ul>
 <li>
-<p><strong>Cluster Admin access</strong> to an OpenShift AI 3.x cluster.</p>
+<p><strong>Platform:</strong> Red Hat OpenShift AI 3.2 (Self-Managed).</p>
 </li>
 <li>
-<p><strong>NVIDIA GPUs</strong> (Pascal architecture or newer for Time-Slicing; Ampere A100/H100 for MIG).</p>
+<p><strong>Access:</strong> <code>cluster-admin</code> privileges to configure Operators and Node Tuning.</p>
 </li>
 <li>
-<p>The <strong>OpenShift CLI (<code>oc</code>)</strong>.</p>
+<p><strong>Hardware:</strong> Access to NVIDIA GPU nodes (L40S, A100, or similar) with the <strong>NVIDIA GPU Operator</strong> and <strong>Node Feature Discovery (NFD)</strong> installed.</p>
+</li>
+<li>
+<p><strong>Tools:</strong> The OpenShift CLI (<code>oc</code>) installed in your terminal.</p>
 </li>
 </ul>
 </div>
@@ -267,23 +246,9 @@ spec:
 </tr>
 </table>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_next_steps"><a class="anchor" href="#_next_steps"></a>Next Steps</h2>
-<div class="sectionbody">
+<hr>
 <div class="paragraph">
-<p>Ready to stop the waste?</p>
-</div>
-<div class="ulist">
-<ul>
-<li>
-<p>Proceed to <strong>Module 2: Configuring Time-Slicing</strong> for the quickest win.</p>
-</li>
-<li>
-<p>Jump to <strong>Module 3: Configuring MIG</strong> for advanced isolation.</p>
-</li>
-</ul>
+<p><strong>Proceed to the next section to begin configuring the virtualization layer.</strong></p>
 </div>
 </div>
 </div>
