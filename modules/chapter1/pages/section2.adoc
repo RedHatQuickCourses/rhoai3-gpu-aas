@@ -1,135 +1,125 @@
-= The Vault (Configuring MIG)
-:navtitle: Configuring MIG
-:imagesdir: ../images
+= Lab: Configuring the Virtualization Layer (Supply)
+:navtitle: Supply Lab: Time-Slicing
 :toc: macro
 
-*How to partition your A100/H100s into secure, isolated hardware instances.*
+// Antora metadata
+:page-role: hands-on-lab
+:description: Implementing GPU Time-Slicing on NVIDIA L40S nodes to maximize density.
 
-[abstract]
-While Time-Slicing increases density, it sacrifices isolation. For production workloads, you need "Hard Walls." Multi-Instance GPU (MIG) allows you to partition a single physical GPU into multiple, completely isolated instances—each with its own dedicated memory, cache, and compute cores.
+[.lead]
+*Raw hardware is inefficient. We must virtualize the asset to maximize throughput.*
 
-toc::[]
+In this lab, you assume the role of the **Infrastructure Engineer**. Your objective is to take a physical NVIDIA L40S (48GB VRAM) and reconfigure it to support multiple concurrent inference workloads.
 
-== Concept: The Apartment Complex
-If Time-Slicing is a gym where everyone shares the equipment, MIG is an apartment complex.
+We will implement a **Time-Slicing Strategy**. By instructing the driver to interleave processes, we will transform 1 physical GPU into 4 logical accelerators, each capable of running a 7B parameter model.
+
+== Prerequisites
+* **Access:** OpenShift CLI (`oc`) with `cluster-admin`.
+* **Target:** A node with an NVIDIA GPU (L40S, A100, or T4).
+* **Operator:** NVIDIA GPU Operator installed.
+
+== Step 1: Define the Slicing Policy (The Blueprint)
+The GPU Operator does not guess your density requirements. You must define them in a `ConfigMap`. We will define a policy named `high-density-slice` that splits the GPU into 4 replicas.
+
+. **Create the Configuration:**
 +
- * **The Structure:** You take one building (The A100) and build permanent walls to create 7 distinct apartments.
- * **The Isolation:** If a fire starts in Apartment 1 (a process crashes), the residents in Apartment 2 are completely safe. They don't share air (Compute) or space (Memory).
- * **The Cost:** You cannot change the walls instantly. Renovating (repartitioning) takes time and requires the building to be empty.
-
-[NOTE]
-.Hardware Requirements
-====
-MIG is only supported on NVIDIA Ampere (A100, A30) and Hopper (H100) architectures. You cannot use MIG on T4, V100, or older cards.
-====
-
-== Step 1: Enable the MIG Strategy
-By default, the NVIDIA GPU Operator assumes you want "Single" mode (one user gets the whole card). We must update the `ClusterPolicy` to allow for "Mixed" usage.
-
 [source,yaml]
 ----
-apiVersion: nvidia.com/v1
-kind: ClusterPolicy
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: gpu-cluster-policy
-spec:
-  # 1. Enable Mixed Strategy
-  # 'mixed' allows you to have different slice sizes on the same node
-  # 'single' forces the entire node to have the exact same slice size
-  migStrategy: mixed
+  name: time-slicing-config
+  namespace: nvidia-gpu-operator
+data:
+  high-density-slice: |-  # <1> The Policy Name
+    version: v1
+    sharing:
+      timeSlicing:
+        resources:
+        - name: nvidia.com/gpu
+          replicas: 4         # <2> The Multiplier (1 GPU = 4 Virtual)
+----
 
-  # 2. Disable Time-Slicing
-  # You generally do not mix Time-Slicing and MIG on the same node
+. **Apply the Blueprint:**
++
+[source,bash]
+----
+oc apply -f time-slicing-config.yaml
+----
+
+== Step 2: Activate the Engine (ClusterPolicy)
+The blueprint exists, but the factory isn't using it yet. We must update the global `ClusterPolicy` to enable the `devicePlugin` configuration.
+
+. **Edit the ClusterPolicy:**
++
+[source,bash]
+----
+oc edit clusterpolicy gpu-cluster-policy
+----
+
+. **Inject the Configuration:**
+Locate the `devicePlugin` section and update it to reference your new map.
++
+[source,yaml]
+----
+spec:
   devicePlugin:
     config:
-      name: "" 
+      name: time-slicing-config  # <1> Must match ConfigMap name
+      default: high-density-slice # <2> The default policy from Step 1
 ----
 
-Once applied, the Operator will restart the device plugin monitor, but **no slicing happens yet.** The operator is simply "ready" to receive orders.
+== Step 3: Target the Machinery (Labeling)
+In a real factory, not every machine runs the same process. We use **Node Labels** to tell the Operator which specific nodes should be sliced.
 
-== Step 2: Define the Geometry (The Labeling)
-Unlike Time-Slicing (which uses a ConfigMap), MIG is controlled by **Node Labels**. The GPU Operator watches your nodes for a specific label key: `nvidia.com/mig.config`.
-
-To split an A100 into 7 small slices (1 compute unit, 5GB memory each), you label the node:
-
+. **Identify your L40S Node:**
++
 [source,bash]
 ----
-oc label node <node-name> nvidia.com/mig.config=all-1g.5gb
+oc get nodes -l nvidia.com/gpu.product=NVIDIA-L40S
 ----
 
-[WARNING]
-.The Drain Event
-====
-Changing the MIG configuration involves resetting the GPU hardware.
-1. The Operator will **drain** the node (evict all running pods).
-2. It will apply the MIG geometry.
-3. It will uncordon the node.
-*Always perform this action during a maintenance window.*
-====
-
-== Step 3: Verify Discovery (NFD)
-Once the node comes back online, Node Feature Discovery (NFD) will see the new hardware reality. Instead of seeing `nvidia.com/gpu`, it will see specific *MIG Profiles*.
-
-Run the discovery command:
+. **Apply the Instruction Label:**
+This label triggers the Operator to reconfigure the Docker runtime and Device Plugin on this specific host.
++
 [source,bash]
 ----
-oc describe node <node-name>
+oc label node <node-name> nvidia.com/device-plugin.config=high-density-slice
 ----
 
-.Output: The New Capacity
+[NOTE]
+.The Reconfiguration Event
+====
+The GPU Operator will detect this label change. It will restart the `nvidia-device-plugin` pod on that node. This usually takes 15-30 seconds. Existing workloads may be disrupted—always perform this on maintenance windows.
+====
+
+== Step 4: Quality Assurance (Verification)
+We must verify that the "Inventory System" (Node Feature Discovery) sees the new capacity.
+
+. **Inspect the Node Capacity:**
++
+[source,bash]
+----
+oc describe node <node-name> | grep "nvidia.com/gpu"
+----
+
+. **Validate the Output:**
+You should see that the capacity has quadrupled.
++
 [source,text]
 ----
 Capacity:
-  nvidia.com/mig-1g.5gb: 7  <1>
-  nvidia.com/gpu: 0         <2>
+  nvidia.com/gpu: 4  <1>
+Allocatable:
+  nvidia.com/gpu: 4
 ----
-<1> **The New Resource:** The node now advertises 7 units of `1g.5gb`.
-<2> **The Old Resource:** The generic "GPU" count drops to 0. You can no longer request a "whole GPU" on this node.
+<1> **Success:** The node now advertises 4 available slots. Kubernetes will allow 4 separate pods to request `nvidia.com/gpu: 1` on this single node.
 
+== Technical Summary
+You have successfully decoupled the logical capacity from the physical hardware.
+* **Input:** 1x NVIDIA L40S.
+* **Process:** Applied Time-Slicing Policy.
+* **Output:** 4x Virtual GPUs ready for assignment.
 
-
-== Step 4: The Hardware Profile
-This is where the user experience differs from Time-Slicing. Because the resource name has changed (from `gpu` to `mig-1g.5gb`), your Hardware Profile must ask for that *exact* name.
-
-[source,yaml]
-----
-apiVersion: dashboard.opendatahub.io/v1alpha1
-kind: HardwareProfile
-metadata:
-  name: nvidia-mig-1g-5gb
-  namespace: redhat-ods-applications
-spec:
-  displayName: "NVIDIA A100 - Small Slice (MIG)"
-  description: "Dedicated 5GB vRAM. 1 Compute Unit. Fully isolated."
-  identifiers:
-    - identifier: nvidia.com/mig-1g.5gb  # <1>
-      count: 1
-  tolerations:
-    - key: "nvidia.com/gpu" 
-      operator: "Exists"
-      effect: "NoSchedule"
-----
-<1> **Precision Matters:** You must match the string exactly as NFD presents it. Common sizes include `1g.5gb`, `2g.10gb`, and `3g.20gb`.
-
-== Lab: The "Hard" Partition
-1. Edit the `ClusterPolicy` to set `migStrategy: mixed`.
-2. Identify an A100 node in your cluster.
-3. Apply the label: `oc label node <node> nvidia.com/mig.config=all-1g.5gb`.
-4. **Wait:** Monitor the node status. It will briefly go `NotReady` or `SchedulingDisabled`.
-5. Verify with `oc describe node`.
-6. Create a "Small Slice" Hardware Profile and launch a workbench.
-
-== Summary: Which Strategy?
-
-[cols="1,1,1", options="header"]
-|===
-|Feature |Time-Slicing (Module 2) |MIG (Module 3)
-|**Isolation** |Low (Shared Memory) |High (Hardware Partition)
-|**Flexibility** |Instant (Software Config) |Slow (Requires Node Drain)
-|**Resource Name** |`nvidia.com/gpu` |`nvidia.com/mig-Xg.Ygb`
-|**Best For** |Dev, Notebooks, Code |Inference, Secure Training
-|===
-
-== Next Steps
-You have built the engine. Now, how do you verify it works?
-Proceed to **Module 4: Validation & Troubleshooting**.
+---
+*The Supply is ready. Proceed to the next section to implement the Governance Layer (Kueue).*
