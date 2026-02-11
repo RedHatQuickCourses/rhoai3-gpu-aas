@@ -117,9 +117,10 @@ Allocatable:
 
 == Technical Summary
 You have successfully decoupled the logical capacity from the physical hardware.
-* **Input:** 1x NVIDIA L40S.
-* **Process:** Applied Time-Slicing Policy.
-* **Output:** 4x Virtual GPUs ready for assignment.
+
+ * **Input:** 1x NVIDIA L40S.
+ * **Process:** Applied Time-Slicing Policy.
+ * **Output:** 4x Virtual GPUs ready for assignment.
 
 ---
 *The Supply is ready. Proceed to the next section to implement the Governance Layer (Kueue).*
