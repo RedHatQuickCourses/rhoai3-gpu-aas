@@ -1,5 +1,5 @@
 site:
-  title: GPU as a Service on Red Hat OpenShift AI 3.2
+  title: End the GPU Bottleneck, Automated Access at Scale
   start_page: rhoai-gpu-aas::index.adoc
 
 content:

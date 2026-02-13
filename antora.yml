@@ -1,5 +1,5 @@
 name: rhoai-gpu-aas
-title: GPU as a Service on Red Hat OpenShift AI 3.2
+title: End the GPU Bottleneck, Automated Access at Scale
 version: 1
 nav:
 - modules/ROOT/nav.adoc
